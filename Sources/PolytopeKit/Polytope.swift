@@ -13,6 +13,10 @@ public struct PolytopeInfo: Sendable {
     public let vertexFigure: String
     public let symmetry: String
     public let symmetryOrder: Int
+    /// Coxeter diagram in bracket notation.
+    public let coxeter: String
+    /// Interior angle between adjacent cells, in degrees.
+    public let dichoralAngle: Double
     public let dual: String
 }
 
@@ -22,27 +26,27 @@ extension PolytopeKind {
         case .cell5:
             return PolytopeInfo(name: "5-cell", altName: "pentachoron", schlafli: "{3,3,3}",
                                 cellType: "tetrahedra", faceType: "triangles", vertexFigure: "tetrahedron",
-                                symmetry: "A₄", symmetryOrder: 120, dual: "self-dual")
+                                symmetry: "A₄", symmetryOrder: 120, coxeter: "[3,3,3]", dichoralAngle: 75.5225, dual: "self-dual")
         case .cell8:
             return PolytopeInfo(name: "8-cell", altName: "tesseract", schlafli: "{4,3,3}",
                                 cellType: "cubes", faceType: "squares", vertexFigure: "tetrahedron",
-                                symmetry: "B₄", symmetryOrder: 384, dual: "16-cell")
+                                symmetry: "B₄", symmetryOrder: 384, coxeter: "[4,3,3]", dichoralAngle: 90, dual: "16-cell")
         case .cell16:
             return PolytopeInfo(name: "16-cell", altName: "hexadecachoron", schlafli: "{3,3,4}",
                                 cellType: "tetrahedra", faceType: "triangles", vertexFigure: "octahedron",
-                                symmetry: "B₄", symmetryOrder: 384, dual: "8-cell")
+                                symmetry: "B₄", symmetryOrder: 384, coxeter: "[4,3,3]", dichoralAngle: 120, dual: "8-cell")
         case .cell24:
             return PolytopeInfo(name: "24-cell", altName: "icositetrachoron", schlafli: "{3,4,3}",
                                 cellType: "octahedra", faceType: "triangles", vertexFigure: "cube",
-                                symmetry: "F₄", symmetryOrder: 1152, dual: "self-dual")
+                                symmetry: "F₄", symmetryOrder: 1152, coxeter: "[3,4,3]", dichoralAngle: 120, dual: "self-dual")
         case .cell120:
             return PolytopeInfo(name: "120-cell", altName: "hecatonicosachoron", schlafli: "{5,3,3}",
                                 cellType: "dodecahedra", faceType: "pentagons", vertexFigure: "tetrahedron",
-                                symmetry: "H₄", symmetryOrder: 14400, dual: "600-cell")
+                                symmetry: "H₄", symmetryOrder: 14400, coxeter: "[5,3,3]", dichoralAngle: 144, dual: "600-cell")
         case .cell600:
             return PolytopeInfo(name: "600-cell", altName: "hexacosichoron", schlafli: "{3,3,5}",
                                 cellType: "tetrahedra", faceType: "triangles", vertexFigure: "icosahedron",
-                                symmetry: "H₄", symmetryOrder: 14400, dual: "120-cell")
+                                symmetry: "H₄", symmetryOrder: 14400, coxeter: "[5,3,3]", dichoralAngle: 164.4775, dual: "120-cell")
         }
     }
 

@@ -2,10 +2,19 @@ import AppKit
 import QuartzCore
 import PolytopeKit
 
-/// Info card (bottom left) and clock (bottom right), drawn with Core Animation over the Metal view.
+/// Text overlay drawn with Core Animation over the Metal view, in one of two layouts.
 final class OverlayView: NSView {
+    private enum Corner { case topLeft, topRight, bottomLeft, bottomRight }
+
+    // Compact layout.
     private let info = CATextLayer()
+    // Quadrants layout.
+    private let title = CATextLayer()
+    private let projection = CATextLayer()
+    private let table = CATextLayer()
+    // Both.
     private let clock = CATextLayer()
+
     private var infoKey = ""
     private var clockKey = ""
     private let clockFormatter: DateFormatter = {
@@ -15,19 +24,23 @@ final class OverlayView: NSView {
     }()
 
     var polytope: (PolytopeKind) -> Polytope = { Polytope.make($0) }
-    var theme: Theme = .ink { didSet { infoKey = ""; clockKey = "" } }
-    var showInfo = true { didSet { info.isHidden = !showInfo } }
+    var theme: Theme = .ink { didSet { invalidate() } }
+    var layout: PolychoraSettings.OverlayLayout = .compact { didSet { invalidate() } }
+    var showInfo = true { didSet { invalidate() } }
     var showClock = true { didSet { clock.isHidden = !showClock } }
+
+    private var infoLayers: [CATextLayer] { [info, title, projection, table] }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         layer = CALayer()
         wantsLayer = true
-        for l in [info, clock] {
+        for l in infoLayers + [clock] {
             l.isWrapped = false
             l.actions = ["contents": NSNull(), "opacity": NSNull(), "bounds": NSNull(), "position": NSNull()]
             layer!.addSublayer(l)
         }
+        projection.alignmentMode = .right
         clock.alignmentMode = .right
     }
 
@@ -35,7 +48,10 @@ final class OverlayView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    private func invalidate() { infoKey = ""; clockKey = "" }
+
     private var unit: CGFloat { max(min(bounds.width, bounds.height), 200) / 1000 }
+    private var margin: CGFloat { 40 * unit }
 
     private var textColor: NSColor {
         let c = theme.text
@@ -43,58 +59,85 @@ final class OverlayView: NSView {
                        blue: CGFloat(linearToSRGB(c.z)), alpha: 1)
     }
 
+    private func style(_ size: CGFloat, _ weight: NSFont.Weight, _ alpha: CGFloat, kern: CGFloat = 0,
+                       monospacedDigits: Bool = false, para: NSParagraphStyle? = nil) -> [NSAttributedString.Key: Any] {
+        let p = (para?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+        p.lineSpacing = 4 * unit
+        let font = monospacedDigits ? NSFont.monospacedDigitSystemFont(ofSize: size * unit, weight: weight)
+                                    : NSFont.systemFont(ofSize: size * unit, weight: weight)
+        return [.font: font, .foregroundColor: textColor.withAlphaComponent(alpha),
+                .kern: kern * unit, .paragraphStyle: p]
+    }
+
+    private func place(_ l: CATextLayer, _ s: NSAttributedString, _ corner: Corner, dy: CGFloat = 0) {
+        l.string = s
+        let size = s.boundingRect(with: CGSize(width: 10000, height: 10000), options: [.usesLineFragmentOrigin]).size
+        let w = ceil(size.width) + 4, h = ceil(size.height) + 4, m = margin
+        let x = (corner == .topLeft || corner == .bottomLeft) ? m : bounds.width - m - w
+        let y = (corner == .bottomLeft || corner == .bottomRight) ? m + dy : bounds.height - m - h + dy
+        l.frame = CGRect(x: x, y: y, width: w, height: h)
+    }
+
     func update(_ frame: FrameState) {
         let scale = window?.backingScaleFactor ?? 2
-        let key = "\(frame.kind.rawValue)|\(frame.projectionLabel)|\(bounds.size)|\(scale)"
+        let key = "\(frame.kind.rawValue)|\(frame.projectionLabel)|\(bounds.size)|\(scale)|\(layout)|\(showInfo)"
         if key != infoKey {
             infoKey = key
-            info.contentsScale = scale
-            info.string = infoText(frame)
-            let size = (info.string as! NSAttributedString).boundingRect(
-                with: CGSize(width: 10000, height: 10000), options: [.usesLineFragmentOrigin]).size
-            let m = 40 * unit
-            info.frame = CGRect(x: m, y: m, width: ceil(size.width) + 4, height: ceil(size.height) + 4)
+            infoLayers.forEach { $0.contentsScale = scale }
+            info.isHidden = !showInfo || layout != .compact
+            for l in [title, projection, table] { l.isHidden = !showInfo || layout != .quadrants }
+            switch layout {
+            case .compact:
+                place(info, compactText(frame), .bottomLeft)
+            case .quadrants:
+                place(title, titleText(frame), .topLeft)
+                place(projection, NSAttributedString(string: frame.projectionLabel,
+                                                     attributes: style(13, .regular, 0.4, kern: 0.6)), .topRight)
+                place(table, tableText(frame), .bottomLeft)
+            }
         }
-        info.opacity = Float(frame.fade)
+        infoLayers.forEach { $0.opacity = Float(frame.fade) }
 
         let now = clockFormatter.string(from: Date())
-        let ckey = "\(now)|\(bounds.size)|\(scale)"
+        let ckey = "\(now)|\(bounds.size)|\(scale)|\(layout)"
         if ckey != clockKey {
             clockKey = ckey
             clock.contentsScale = scale
+            let (size, weight): (CGFloat, NSFont.Weight) = layout == .quadrants ? (58, .light) : (54, .ultraLight)
             let s = NSAttributedString(string: now, attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 54 * unit, weight: .ultraLight),
+                .font: NSFont.monospacedDigitSystemFont(ofSize: size * unit, weight: weight),
                 .foregroundColor: textColor.withAlphaComponent(0.75),
                 .kern: 2 * unit,
             ])
-            clock.string = s
-            let size = s.size()
-            let m = 40 * unit
-            clock.frame = CGRect(x: bounds.width - m - ceil(size.width) - 4, y: m - 6 * unit,
-                                 width: ceil(size.width) + 4, height: ceil(size.height) + 4)
+            place(clock, s, .bottomRight, dy: -6 * unit)
         }
     }
 
-    private func infoText(_ frame: FrameState) -> NSAttributedString {
-        let i = frame.kind.info
-        let poly = polytope(frame.kind)
-        let p = (v: poly.vertices.count, e: poly.edges.count, f: poly.faces.count, c: poly.cells.count)
-        let color = textColor
-        func style(_ size: CGFloat, _ weight: NSFont.Weight, _ alpha: CGFloat, kern: CGFloat = 0) -> [NSAttributedString.Key: Any] {
-            let para = NSMutableParagraphStyle()
-            para.lineSpacing = 4 * unit
-            return [.font: NSFont.systemFont(ofSize: size * unit, weight: weight),
-                    .foregroundColor: color.withAlphaComponent(alpha),
-                    .kern: kern * unit, .paragraphStyle: para]
-        }
-        let grouped = NumberFormatter()
-        grouped.numberStyle = .decimal
-        grouped.groupingSeparator = "\u{2009}"
-        func n(_ x: Int) -> String { grouped.string(from: NSNumber(value: x)) ?? "\(x)" }
+    private func n(_ x: Int) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = "\u{2009}"
+        return f.string(from: NSNumber(value: x)) ?? "\(x)"
+    }
 
+    private func counts(_ kind: PolytopeKind) -> (v: Int, e: Int, f: Int, c: Int) {
+        let p = polytope(kind)
+        return (p.vertices.count, p.edges.count, p.faces.count, p.cells.count)
+    }
+
+    private func titleText(_ frame: FrameState) -> NSMutableAttributedString {
+        let i = frame.kind.info
         let s = NSMutableAttributedString()
         s.append(NSAttributedString(string: i.name + "\n", attributes: style(34, .light, 0.9, kern: 0.5)))
-        s.append(NSAttributedString(string: "\(i.altName)   \(i.schlafli)\n", attributes: style(15, .regular, 0.6, kern: 1)))
+        s.append(NSAttributedString(string: "\(i.altName)   \(i.schlafli)", attributes: style(15, .regular, 0.6, kern: 1)))
+        return s
+    }
+
+    private func compactText(_ frame: FrameState) -> NSAttributedString {
+        let i = frame.kind.info
+        let p = counts(frame.kind)
+        let s = titleText(frame)
+        s.append(NSAttributedString(string: "\n", attributes: style(15, .regular, 0.6, kern: 1)))
         s.append(NSAttributedString(string: "\n", attributes: style(6, .regular, 0)))
         let body = style(13, .regular, 0.55, kern: 0.6)
         s.append(NSAttributedString(string: "\(n(p.v)) vertices · \(n(p.e)) edges · \(n(p.f)) faces · \(n(p.c)) cells\n", attributes: body))
@@ -102,6 +145,66 @@ final class OverlayView: NSView {
         s.append(NSAttributedString(string: "symmetry \(i.symmetry), order \(n(i.symmetryOrder)) · dual: \(i.dual)\n", attributes: body))
         s.append(NSAttributedString(string: frame.projectionLabel, attributes: style(13, .regular, 0.4, kern: 0.6)))
         return s
+    }
+
+    /// Four columns: label | value | label | value. Numeric values right-align in column 2.
+    private func tableText(_ frame: FrameState) -> NSAttributedString {
+        let i = frame.kind.info
+        let p = counts(frame.kind)
+        let angle = String(format: "%.2f°", i.dichoralAngle).replacingOccurrences(of: ".00°", with: "°")
+        let rows: [(String, String, String, String)] = [
+            ("vertices", n(p.v), "vertex figure", i.vertexFigure),
+            ("edges", n(p.e), "dichoral angle", angle),
+            ("faces", n(p.f), "polygons", i.faceType),
+            ("cells", n(p.c), "polyhedra", i.cellType),
+            ("symmetry", i.symmetry, "order", n(i.symmetryOrder)),
+            ("coxeter group", i.coxeter, "dual", i.dual),
+        ]
+        let label = style(13, .regular, 0.4, kern: 0.6)
+        let value = style(13, .regular, 0.7, kern: 0.6, monospacedDigits: true)
+        func width(_ s: String, _ a: [NSAttributedString.Key: Any]) -> CGFloat { NSAttributedString(string: s, attributes: a).size().width }
+        let w0 = rows.map { width($0.0, label) }.max()!
+        let w1 = rows.map { width($0.1, value) }.max()!
+        let w2 = rows.map { width($0.2, label) }.max()!
+        let c1 = ceil(w0 + 18 * unit + w1), c2 = ceil(c1 + 32 * unit), c3 = ceil(c2 + w2 + 18 * unit)
+
+        let para = NSMutableParagraphStyle()
+        para.tabStops = [NSTextTab(textAlignment: .right, location: c1),
+                         NSTextTab(textAlignment: .left, location: c2),
+                         NSTextTab(textAlignment: .left, location: c3)]
+        let labelP = style(13, .regular, 0.4, kern: 0.6, para: para)
+        let valueP = style(13, .regular, 0.7, kern: 0.6, monospacedDigits: true, para: para)
+
+        let s = NSMutableAttributedString()
+        for (k, r) in rows.enumerated() {
+            s.append(NSAttributedString(string: r.0 + "\t", attributes: labelP))
+            s.append(NSAttributedString(string: r.1 + "\t", attributes: valueP))
+            s.append(NSAttributedString(string: r.2 + "\t", attributes: labelP))
+            s.append(NSAttributedString(string: r.3 + (k < rows.count - 1 ? "\n" : ""), attributes: valueP))
+        }
+        return s
+    }
+}
+
+extension Renderer {
+    /// Composite the overlay onto a snapshot (points == pixels / scale).
+    public func compositeOverlay(_ frame: FrameState, settings: PolychoraSettings, onto image: CGImage,
+                                 scale: CGFloat = 2) -> CGImage? {
+        let w = image.width, h = image.height
+        let overlay = OverlayView(frame: NSRect(x: 0, y: 0, width: CGFloat(w) / scale, height: CGFloat(h) / scale))
+        overlay.polytope = { [unowned self] in self.polytope($0) }
+        overlay.theme = Theme.named(settings.theme)
+        overlay.layout = settings.overlayLayout
+        overlay.showInfo = settings.showInfo
+        overlay.showClock = settings.showClock
+        overlay.update(frame)
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.scaleBy(x: scale, y: scale)
+        overlay.layer!.render(in: ctx)
+        return ctx.makeImage()
     }
 }
 

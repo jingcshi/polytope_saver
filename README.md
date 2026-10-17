@@ -19,7 +19,7 @@ Then pick **Polychora** in System Settings → Wallpaper → Screen Saver → Ot
 Requires Xcode (the Makefile sets `DEVELOPER_DIR`, so `xcode-select` can stay on the CLT) and the Metal Toolchain component.
 Inside Cursor's agent sandbox, SwiftPM needs `--disable-sandbox`, and anything touching the GPU (preview, snapshots, `make thumbnail`) must run unsandboxed.
 
-Preview keys: `←/→` previous/next · `1–6` pick polytope · `0` cycle all · `p` projection mode · `t` theme · `i` info · `c` clock · `+/-` speed · `space` pause · `r` reload shaders · `f` fullscreen.
+Preview keys: `←/→` previous/next · `1–6` pick polytope · `0` cycle all · `p` projection mode · `t` theme · `i` info · `l` info layout · `c` clock · `+/-` speed · `space` pause · `r` reload shaders · `f` fullscreen.
 
 Headless render, for comparing looks:
 

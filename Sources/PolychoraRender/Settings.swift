@@ -14,6 +14,15 @@ public struct PolychoraSettings: Sendable {
         }
     }
 
+    public enum OverlayLayout: Int, CaseIterable, Sendable {
+        /// Single info card bottom left, clock bottom right.
+        case compact
+        /// Title, projection, geometry table and clock in the four corners.
+        case quadrants
+
+        public var label: String { self == .compact ? "Compact" : "Quadrants" }
+    }
+
     /// nil cycles through all six.
     public var polytope: PolytopeKind?
     public var projection: Projection = .alternate
@@ -21,6 +30,7 @@ public struct PolychoraSettings: Sendable {
     public var theme: String = Theme.ink.name
     public var showInfo = true
     public var showClock = true
+    public var overlayLayout: OverlayLayout = .compact
     /// Seconds spent in each projection before morphing / moving on.
     public var holdSeconds: Double = 30
 
@@ -28,7 +38,7 @@ public struct PolychoraSettings: Sendable {
 
     private enum Key {
         static let polytope = "polytope", projection = "projection", speed = "speed", theme = "theme"
-        static let showInfo = "showInfo", showClock = "showClock", hold = "holdSeconds"
+        static let showInfo = "showInfo", showClock = "showClock", hold = "holdSeconds", layout = "overlayLayout"
     }
 
     public static func load(from d: UserDefaults) -> PolychoraSettings {
@@ -40,6 +50,7 @@ public struct PolychoraSettings: Sendable {
         if let v = d.object(forKey: Key.showInfo) as? Bool { s.showInfo = v }
         if let v = d.object(forKey: Key.showClock) as? Bool { s.showClock = v }
         if let v = d.object(forKey: Key.hold) as? Double { s.holdSeconds = v }
+        if let v = d.object(forKey: Key.layout) as? Int, let l = OverlayLayout(rawValue: v) { s.overlayLayout = l }
         return s
     }
 
@@ -51,6 +62,7 @@ public struct PolychoraSettings: Sendable {
         d.set(showInfo, forKey: Key.showInfo)
         d.set(showClock, forKey: Key.showClock)
         d.set(holdSeconds, forKey: Key.hold)
+        d.set(overlayLayout.rawValue, forKey: Key.layout)
         d.synchronize()
     }
 }

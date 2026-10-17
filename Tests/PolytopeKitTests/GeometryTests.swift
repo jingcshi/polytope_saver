@@ -43,6 +43,15 @@ private let expected: [PolytopeKind: (v: Int, e: Int, f: Int, c: Int, faceSize: 
         }
     }
 
+    /// Adjacent cells meet at 180° minus the angle between their outward normals.
+    @Test(arguments: PolytopeKind.allCases)
+    func dichoralAngle(_ kind: PolytopeKind) {
+        let p = Polytope.make(kind)
+        let pair = p.faceCells[0]
+        let normalAngle = acos(simd_dot(p.cellCentres[pair.x], p.cellCentres[pair.y])) * 180 / .pi
+        #expect(abs((180 - normalAngle) - kind.info.dichoralAngle) < 1e-3)
+    }
+
     /// The natural rotation by one period is a symmetry, and its orbits partition evenly.
     @Test(arguments: PolytopeKind.allCases)
     func naturalRotationIsSymmetry(_ kind: PolytopeKind) {

@@ -11,6 +11,7 @@ final class ConfigureSheet: NSObject {
     private let polytope = NSPopUpButton()
     private let projection = NSPopUpButton()
     private let theme = NSPopUpButton()
+    private let layout = NSPopUpButton()
     private let speed = NSSlider(value: 1, minValue: 0.25, maxValue: 3, target: nil, action: nil)
     private let hold = NSSlider(value: 30, minValue: 10, maxValue: 120, target: nil, action: nil)
     private let info = NSButton(checkboxWithTitle: "Show info card", target: nil, action: nil)
@@ -19,7 +20,7 @@ final class ConfigureSheet: NSObject {
     init(settings: PolychoraSettings, onSave: @escaping (PolychoraSettings) -> Void) {
         self.settings = settings
         self.onSave = onSave
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 300),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 330),
                           styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
 
@@ -30,6 +31,8 @@ final class ConfigureSheet: NSObject {
         projection.selectItem(at: settings.projection.rawValue)
         Theme.all.forEach { theme.addItem(withTitle: $0.name) }
         theme.selectItem(withTitle: settings.theme)
+        PolychoraSettings.OverlayLayout.allCases.forEach { layout.addItem(withTitle: $0.label) }
+        layout.selectItem(at: settings.overlayLayout.rawValue)
         speed.doubleValue = settings.speed
         hold.doubleValue = settings.holdSeconds
         info.state = settings.showInfo ? .on : .off
@@ -39,7 +42,7 @@ final class ConfigureSheet: NSObject {
             [NSTextField(labelWithString: label), control]
         }
         let grid = NSGridView(views: [
-            row("Polytope:", polytope), row("Projection:", projection), row("Theme:", theme),
+            row("Polytope:", polytope), row("Projection:", projection), row("Theme:", theme), row("Info layout:", layout),
             row("Rotation speed:", speed), row("Seconds per view:", hold),
             [NSGridCell.emptyContentView, info], [NSGridCell.emptyContentView, clock],
         ])
@@ -72,6 +75,7 @@ final class ConfigureSheet: NSObject {
         settings.theme = theme.titleOfSelectedItem ?? Theme.ink.name
         settings.speed = speed.doubleValue
         settings.holdSeconds = hold.doubleValue.rounded()
+        settings.overlayLayout = .init(rawValue: layout.indexOfSelectedItem) ?? .compact
         settings.showInfo = info.state == .on
         settings.showClock = clock.state == .on
         onSave(settings)

@@ -1,22 +1,23 @@
 # TODO
 
-## Phase 0 — evaluate off-the-shelf
+## Decided
 
-- [ ] Install `Polytopes.saver` from XScreenSaver 6.17 into `~/Library/Screen Savers/`.
-- [ ] Check it on Tahoe 26.4: runs fullscreen, preview works, no `legacyScreenSaver` CPU pile-up after several activations.
-- [ ] Decide whether it's good enough. If it is, stop here. If not, list the gaps that justify a custom build.
+- Visualisation: perspective and stereographic, morphing within each polytope's slot.
+- Elements: edge tubes, vertex spheres, translucent faces; no cell rendering.
+- Motion: Hopf-aligned isoclinic rotation (Petrie double rotation for the 5-cell) + slow drift.
+- Extras: info card, clock, slideshow of all six, options sheet.
+- Packaging: legacy `.saver`.
 
-## Phase 1 — design (only if Phase 0 falls short)
+## Now
 
-Open questions. `Polytopes` defaults are in brackets.
+- [ ] Verify the installed saver on macOS 27: fullscreen run, System Settings thumbnail/preview, options sheet, multiple monitors, no instance pile-up after several activations.
+- [ ] Aesthetics pass in the preview app: pick / refine themes (Ink, Porcelain, Brass are placeholders), tube and vertex sizes per polytope, face opacity, ring colouring on/off.
+- [ ] Stereographic framing: choose the base orientation so a Hopf ring passes through the pole (tunnel fly-through) vs. ring-torus side view.
 
-1. Visualisation: slices / orthographic / perspective / stereographic / slideshow. [perspective or orthographic projection]
-2. V/E/F/C rendering; whether cells are rendered at all. [wireframe or faces; no per-cell treatment]
-3. Motion: camera fly-in to inner cells; XYZ-only vs XW/YW/ZW vs double rotations. [constant six-plane speeds; fixed camera]
-4. Aesthetics: colour themes, textures. [red, or w-depth hue]
-5. Extras: info panel (name, Schläfli symbol, V/E/F/C counts, symmetry group); clock. Interactivity is limited to the configure sheet. [none]
+## Later
 
-## Phase 2 — build prerequisites
-
-- [ ] Install Xcode (only CLT present).
-- [ ] Start from the ScreenSaverMinimal template; Swift + Metal; apply the Tahoe workarounds listed in README.
+- [ ] Transition polish: the cross-fade is a plain fade to background; consider a 4D "dissolve" or zoom.
+- [ ] Antialiasing of thin far tubes (MSAA 4× now); maybe line-width floor in pixels.
+- [ ] EDR / wide gamut output for highlights.
+- [ ] Info card drift for burn-in safety on external OLEDs.
+- [ ] Optional cell rendering (shrunken cells, Hopf-ring colouring) as a mode.

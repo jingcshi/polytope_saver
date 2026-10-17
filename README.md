@@ -1,70 +1,53 @@
-# polytope_saver
+# Polychora
 
-A macOS 26 (Tahoe) screensaver featuring the six convex regular 4-polytopes:
-5-cell, 8-cell, 16-cell, 24-cell, 120-cell, 600-cell.
+A macOS screensaver of the six convex regular 4-polytopes: 5-, 8-, 16-, 24-, 120- and 600-cell.
+Swift + Metal, legacy `.saver` format, built without an Xcode project.
 
-**Status: evaluation.** An off-the-shelf saver already exists (below). A custom
-build only proceeds if it falls short. See `TODO.md`.
+![120-cell, stereographic](Resources/thumbnail@2x.png)
 
-## Off-the-shelf: XScreenSaver `Polytopes`
+## Build and install
 
-[XScreenSaver](https://www.jwz.org/xscreensaver/) (jwz) ships `Polytopes`
-(Carsten Steger, 2003) as a native `.saver`. Current release 6.17 (2026-10-15),
-requires macOS 14.6+. Its author runs macOS 14, so Tahoe support isn't tested upstream.
+```sh
+make test        # geometry tests (V/E/F/C counts, Euler, symmetry of the rotation)
+make preview     # windowed dev harness, shader hot-reload
+make install     # build Polychora.saver → ~/Library/Screen Savers, restart legacyScreenSaver
+make uninstall
+```
 
-- Install everything: `brew install --cask xscreensaver` (runs a `.pkg`, needs admin), or
-- Install only this saver: open the DMG and copy `Polytopes.saver` into
-  `~/Library/Screen Savers/` (no admin needed).
+Then pick **Polychora** in System Settings → Wallpaper → Screen Saver → Other. *Options…* opens the configure sheet.
 
-Capabilities ([manpage](https://man.archlinux.org/man/extra/xscreensaver/polytopes.6.en)):
+Requires Xcode (the Makefile sets `DEVELOPER_DIR`, so `xcode-select` can stay on the CLT) and the Metal Toolchain component.
+Inside Cursor's agent sandbox, SwiftPM needs `--disable-sandbox`, and anything touching the GPU (preview, snapshots, `make thumbnail`) must run unsandboxed.
 
-| Aspect | Polytopes offers |
+Preview keys: `←/→` previous/next · `1–6` pick polytope · `0` cycle all · `p` projection mode · `t` theme · `i` info · `c` clock · `+/-` speed · `space` pause · `r` reload shaders · `f` fullscreen.
+
+Headless render, for comparing looks:
+
+```sh
+.build/release/PolychoraPreview --snapshot out.png --kind 600 --stereo 1 --time 12 --theme Ink --size 1600x1000
+```
+
+## Layout
+
+| Path | Role |
 | --- | --- |
-| Polytope | any one of the six, or random |
-| 4D→3D | perspective or orthographic |
-| 3D→2D | perspective or orthographic |
-| Rendering | wireframe, solid faces, or transparent faces |
-| Colour | single (red), or hue wheel by unrotated w-depth |
-| Motion | constant-speed rotation in all six planes (XY XZ YZ XW YW ZW); simultaneous non-zero speeds give double rotations |
+| `Sources/PolytopeKit` | Geometry: vertex sets, edges/faces/cells, Hopf-aligned rotations, ring orbits |
+| `Sources/PolychoraRender` | Metal renderer, slideshow timeline, themes, settings, overlay; `PolychoraView` is host-agnostic |
+| `Shaders/Polychora.metal` | All shaders; runtime-compiled in the preview, precompiled `.metallib` in the saver |
+| `Sources/PolychoraSaver` | `ScreenSaverView` subclass + options sheet; thin wrapper around `PolychoraView` |
+| `Sources/PolychoraPreview` | Dev app and snapshot tool |
+| `Resources/` | Saver `Info.plist`, thumbnails (`make thumbnail`) |
 
-Not offered: slices, stereographic projection, camera fly-through, cell-wise
-rendering or colouring, info overlay, clock, slideshow transitions,
-themes. Renders with OpenGL, which Apple has deprecated but still ships.
+## Design
 
-## Building a custom saver on macOS 26 — what's needed
+**Geometry.** Vertex coordinates are written out only for the 5-cell (as a regular pentagon-pair on the Clifford torus), 16-cell (±eᵢ), 8-cell ((±½)⁴), 24-cell (binary tetrahedral group 2T) and 600-cell (binary icosahedral group 2I). The 120-cell's vertices are the 600-cell's normalised cell centres. Cells are 4-cliques (simplicial cases) or the vertices maximising ⟨v, d⟩ for each dual direction d. Faces are ≥3-vertex intersections of adjacent cells.
 
-- **Xcode** (full app, not just CLT; this machine currently has CLT only).
-  Template: *macOS → Screen Saver*. Output is a `.saver` bundle whose
-  `NSPrincipalClass` subclasses `ScreenSaverView` (an `NSView`).
-- **Install / enable:** copy the `.saver` to `~/Library/Screen Savers/` (or
-  double-click it) → System Settings → Screen Saver → pick it. Options sheet
-  = `hasConfigureSheet` / `configureSheet`. No admin needed.
-- **Hosting:** third-party savers run inside `legacyScreenSaver.appex`, which
-  is buggy in Sonoma/Sequoia/Tahoe. Known workarounds:
-  - Drive rendering from your own `MTKView` / display link, not
-    `animateOneFrame` (the host can stop calling it).
-  - Load Metal shaders with `makeDefaultLibrary(bundle: Bundle(for: Self.self))`
-    — the default library resolves against the host app.
-  - Each activation creates a new `ScreenSaverView` without destroying the
-    old one; `stopAnimation` is effectively preview-only. Observe the
-    `com.apple.screensaver.willstop` distributed notification and exit the
-    process ~1 s later (Tahoe fires it too early).
-  - Iterate with `killall legacyScreenSaver` (sometimes
-    `killall -m WallpaperAgent`) after each reinstall; settings cache aggressively.
-  - Thumbnail: ship `thumbnail.png` *and* set `ScreenSaverThumbnail` in Info.plist.
-- **Interactivity:** essentially none. Any key/mouse input dismisses the saver;
-  only the configure sheet is interactive. A clock or info overlay is just
-  drawn content.
-- **SwiftUI** is unreliable for the main view (fine for the configure sheet);
-  use AppKit + Metal.
-- **Signing:** ad-hoc / local signing is fine for personal use; notarisation
-  is needed only to distribute.
+**Projection.** One formula covers both modes: `p₃ = s.xyz · d / (d − s.w)`, where `s = mix(q, q/|q|, blend)`. With blend 0 and d = 2.2 this is the classic perspective projection of the flat polytope. With blend 1 and d = 1 it is stereographic projection of the polytope pushed onto S³: edges become circular arcs and cells become curved bubbles. Animating (d, blend) morphs one into the other. The scale factor λ = d/(d − w) also sets tube radius (conformal), capped near the pole. Geometry with large λ fades into fog.
 
-References:
-[ScreenSaverMinimal (Aerial team template with Tahoe fixes)](https://github.com/AerialScreensaver/ScreenSaverMinimal),
-[liquid-glass-screensaver (Metal example)](https://github.com/destefanis/liquid-glass-screensaver),
-[zsmb.co Tahoe notes](https://zsmb.co/building-a-macos-screen-saver-in-kotlin/),
-[Michael Tsai roundup](https://mjtsai.com/blog/2025/12/10/how-to-make-a-macos-screen-saver/).
-Geometry/rendering prior art (not savers):
-[mwalczyk/polychora](https://github.com/mwalczyk/polychora) (slices, tetrahedral cells),
-Hollasch, *Four-Space Visualization of 4D Objects*.
+**Motion.** Each polytope rotates by its *natural* one-parameter group: left multiplication by exp(θu) for a quaternion axis u through a vertex of 2T/2I/Q₈ (an isoclinic rotation whose orbits are Hopf circles), or the (θ, 2θ) Petrie double rotation for the 5-cell. One period maps the polytope onto itself, so rings of edges slide along themselves. Edges whose endpoints share an orbit are coloured by ring, which makes the Hopf great circles visible. A slow drift in four planes varies the view.
+
+**Hosting.** The `.saver` works around `legacyScreenSaver` bugs. Rendering runs from the MTKView's own display link rather than `animateOneFrame`. Shaders load from the saver's bundle, not the host's. The process exits 1 s after `com.apple.screensaver.willstop`, because the host otherwise piles up instances.
+
+## Background
+
+XScreenSaver's `Polytopes` (2003) covers the same six objects but looks and moves poorly by current standards. The private `.appex` screensaver API (Aerial 4, [AppexSaverMinimal](https://github.com/AerialScreensaver/AppexSaverMinimal)) avoids the legacy host's bugs. It is the fallback if those bugs become unmanageable.

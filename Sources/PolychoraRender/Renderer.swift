@@ -29,6 +29,8 @@ struct Uniforms {
     var rimLight: SIMD4<Float>
     var highlight: SIMD4<Float>
     var hdr: SIMD4<Float>
+    var metal: SIMD4<Float>
+    var metalTint: SIMD4<Float>
 }
 
 /// Layout mirrors `Instance` in Polychora.metal.
@@ -194,7 +196,7 @@ public final class Renderer {
             device.makeBuffer(bytes: a, length: MemoryLayout<Instance>.stride * a.count)!
         }
         let m = Model(polytope: p, edges: buffer(edges), vertices: buffer(verts), faces: buffer(tris),
-                      faceCount: tris.count, edgeRadius: Float(0.016 * pow(p.edgeLength, 0.4)),
+                      faceCount: tris.count, edgeRadius: Float(0.0096 * pow(p.edgeLength, 0.4)),
                       framing: Rotation4.aligning(p.cellCentres[0], to: Vec4(0, 0, 0, 1)))
         models[kind] = m
         return m
@@ -219,7 +221,7 @@ public final class Renderer {
         let t = theme
         let r = m.framing * frame.rotation
         let signature = coloring == .signature
-        let colors = signature ? t.signatureColors(frame.kind) : (edge: t.edge, vertex: t.vertex, face: t.face)
+        let face = signature ? t.signatureColors(frame.kind).face : t.face
         func c(_ v: SIMD3<Float>) -> SIMD4<Float> { SIMD4<Float>(v, 1) }
         // EDR: highlights roll off towards min(theme peak, display headroom); the highlight gain only
         // applies to the extent the display has headroom, so SDR output is unchanged.
@@ -231,10 +233,10 @@ public final class Renderer {
             viewProj: viewProj,
             cameraPos: c(eye),
             proj: [d, s, d, 0.02],
-            radii: [m.edgeRadius, m.edgeRadius * 1.4, Float(frame.fade), 0],
+            radii: [m.edgeRadius, m.edgeRadius, Float(frame.fade), 0],
             fog: [t.fogDensity, 0.15, 0.9, signature ? t.faceAlpha * t.signature.faceAlphaScale : t.faceAlpha],
             bgTop: c(t.backgroundTop), bgBottom: c(t.backgroundBottom),
-            edgeColor: c(colors.edge), vertexColor: c(colors.vertex), faceColor: c(colors.face),
+            edgeColor: c(t.edge), vertexColor: c(t.edge), faceColor: c(face),
             lightDir: SIMD4<Float>(t.lightDir, 0),
             palA: c(t.palette.a), palB: c(t.palette.b), palC: c(t.palette.c), palD: c(t.palette.d),
             style: [signature ? 0 : t.ringMix, t.fresnelPower, t.specular, transition == .dissolve ? 1 : 0],
@@ -243,7 +245,9 @@ public final class Renderer {
             glow: t.glowUniforms.0, glowShape: t.glowUniforms.1,
             rimLight: SIMD4<Float>(t.rim, 0),
             highlight: SIMD4<Float>(t.highlight, t.highlightGain),
-            hdr: [ceiling, hdrActive, 0, 0])
+            hdr: [ceiling, hdrActive, 0, 0],
+            metal: [t.metal.sharpness, t.metal.reflection, t.metal.softbox, t.metal.diffuse],
+            metalTint: [t.metal.tint, 0, 0, 0])
     }
 
     public func encode(_ frame: FrameState, pass: MTLRenderPassDescriptor, size: CGSize,

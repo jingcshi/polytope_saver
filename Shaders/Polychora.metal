@@ -24,6 +24,8 @@ struct Uniforms {
     float4 rimLight;    // rgb (colour × strength)
     float4 highlight;   // rgb: the theme's "highlight" (dissolve glow), w: EDR highlight gain
     float4 hdr;         // x: highlight ceiling = min(theme peak, display headroom), y: EDR active 0…1
+    float4 metal;       // specular exponent, reflection, softbox, diffuse
+    float4 metalTint;   // x: how far reflections take the base colour (0 steel, 1 brass)
 };
 
 // EDR gain for highlights; 1 on SDR displays.
@@ -243,7 +245,7 @@ vertex VOut vertex_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 n = tmpl[vid];
     Instance v = inst[iid];
     Projected c = project4(u.rot4 * v.a, u);
-    Floored r = pixelFloor(c.p, u.radii.y * min(c.lambda, u.pole.x), 0.9, u);
+    Floored r = pixelFloor(c.p, u.radii.y * min(c.lambda, u.pole.x), 0.7, u);
     float3 world = c.p + n * r.radius;
     VOut o;
     o.coverage = r.coverage;
@@ -257,10 +259,44 @@ vertex VOut vertex_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     return o;
 }
 
+// What the framework reflects: the theme gradient by elevation, an overhead softbox (so dark themes
+// still have something to mirror), and the theme's glow (horizon band, or halo behind the object).
+static float3 environment(float3 R, constant Uniforms& u) {
+    float3 c = mix(u.bgBottom.xyz, u.bgTop.xyz, saturate(0.5 + 0.5 * R.y));
+    c += u.metal.z * smoothstep(0.55, 0.85, R.y);
+    if (u.glow.w > 1.5) {
+        c += u.glow.xyz * pow(saturate(-R.z), 4.0);
+    } else if (u.glow.w > 0.5) {
+        float dy = (R.y - (u.glowShape.y * 2.0 - 1.0) * 0.5) / (2.0 * u.glowShape.z);
+        c += u.glow.xyz * exp(-dy * dy);
+    }
+    return c;
+}
+
+// Edges and joints as one cast-metal piece: environment reflection plus a sharp key highlight,
+// tinted by the base colour to the theme's degree, over a weak diffuse term.
+static float3 metalShade(float3 base, float3 n, float3 world, constant Uniforms& u) {
+    float3 V = normalize(u.cameraPos.xyz - world);
+    if (dot(n, V) < 0.0) n = -n;
+    float3 L = normalize(u.lightDir.xyz);
+    float3 H = normalize(L + V);
+    float3 R = reflect(-V, n);
+    float NoV = saturate(dot(n, V));
+    float3 tint = mix(float3(1.0), base / max(max(base.r, max(base.g, base.b)), 1e-3), u.metalTint.x);
+    float spec = pow(saturate(dot(n, H)), u.metal.x) * u.style.z * highlightGain(u);
+    // Schlick reflectance from metal.y head-on, rising at grazing angles but capped at 0.35 so dark
+    // metal never grows a bright outline.
+    float F = mix(u.metal.y, max(u.metal.y, 0.35), pow(1.0 - NoV, 5.0));
+    float3 reflection = tint * (F * environment(R, u) + spec);
+    float3 diffuse = base * (0.6 * saturate(dot(n, L)) + 0.3 * (0.5 + 0.5 * n.y) + 0.1) * u.metal.w;
+    float rim = pow(1.0 - NoV, 3.0);
+    return diffuse + reflection + u.rimLight.xyz * rim;
+}
+
 fragment float4 opaque_fs(VOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
     if (in.valid < 0.999 || in.lambda > u.pole.z) discard_fragment();
     float glow = dissolve(in.obj, 0.0, u);
-    float3 c = shade(in.color, normalize(in.normal), in.world, u.style.z, u);
+    float3 c = metalShade(in.color, normalize(in.normal), in.world, u);
     return float4(toneCeiling(applyFog(ember(c, glow, u), in.world, in.lambda, u), u), in.coverage);
 }
 

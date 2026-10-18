@@ -73,6 +73,15 @@ public struct Theme: Sendable {
     /// How this theme renders the polytopes' signature hues (OKLCH lightness and chroma).
     public var signature = Signature(edgeL: 0.8, edgeC: 0.07, vertexL: 0.86, vertexC: 0.06,
                                      faceL: 0.62, faceC: 0.04, faceAlphaScale: 0.85)
+    /// Framework material; `edge` is the metal's base colour.
+    public var metal = Metal(sharpness: 60, reflection: 0.8, softbox: 0.35, diffuse: 0.7, tint: 0.2)
+
+    /// Cast metal: specular exponent, strength of the environment reflection (theme gradient, glow and an
+    /// overhead softbox of strength `softbox`), diffuse weight, and how far reflections take the base
+    /// colour (0 steel, 1 brass).
+    public struct Metal: Sendable {
+        public var sharpness, reflection, softbox, diffuse, tint: Float
+    }
     /// Info card text colours where the background differs by corner; nil uses `text` everywhere.
     public var cardText: CardText?
 
@@ -95,20 +104,21 @@ public struct Theme: Sendable {
     public static let ink = Theme(
         name: "Ink",
         backgroundTop: [0.022, 0.028, 0.048], backgroundBottom: [0.003, 0.005, 0.010],
-        edge: [0.78, 0.72, 0.60], vertex: [0.92, 0.86, 0.72], face: [0.32, 0.46, 0.66],
+        edge: [0.40, 0.41, 0.43], vertex: [0.92, 0.86, 0.72], face: [0.32, 0.46, 0.66],
         text: [0.70, 0.68, 0.62],
         palette: ([0.50, 0.48, 0.46], [0.28, 0.24, 0.22], [1, 1, 1], [0.00, 0.33, 0.67]),
         ringMix: 0.6, faceAlpha: 0.10, fresnelPower: 2.5, specular: 0.35, fogDensity: 0.05,
         glow: .horizon(color: [0.016, 0.024, 0.046], y: 0.25, width: 0.18),
         highlight: [0.62, 0.82, 1.0], highlightGain: 2.2, peak: 3.0,    // cool filament
         signature: .init(edgeL: 0.80, edgeC: 0.075, vertexL: 0.86, vertexC: 0.06,
-                         faceL: 0.62, faceC: 0.05, faceAlphaScale: 0.85))
+                         faceL: 0.62, faceC: 0.05, faceAlphaScale: 0.85),
+        metal: .init(sharpness: 80, reflection: 0.9, softbox: 0.30, diffuse: 0.6, tint: 0.15))
 
     /// Late afternoon: halfway (in sRGB) between a clear day sky and dusk, with a warm horizon.
     public static let sky = Theme(
         name: "Sky",
         backgroundTop: [0.119, 0.235, 0.461], backgroundBottom: [0.451, 0.511, 0.625],
-        edge: [0.05, 0.07, 0.12], vertex: [0.04, 0.05, 0.09], face: [0.92, 0.93, 1.00],
+        edge: [0.03, 0.035, 0.045], vertex: [0.04, 0.05, 0.09], face: [0.92, 0.93, 1.00],
         text: [0.04, 0.07, 0.13],
         palette: ([0.40, 0.42, 0.48], [0.20, 0.18, 0.16], [1, 1, 1], [0.55, 0.85, 0.15]),
         ringMix: 0.3, faceAlpha: 0.16, fresnelPower: 2.0, specular: 0.3, fogDensity: 0.03,
@@ -117,13 +127,14 @@ public struct Theme: Sendable {
         highlight: [1.0, 0.62, 0.38], highlightGain: 1.6, peak: 2.0,     // sunset peach
         signature: .init(edgeL: 0.40, edgeC: 0.095, vertexL: 0.36, vertexC: 0.08,
                          faceL: 0.88, faceC: 0.04, faceAlphaScale: 0.9),
+        metal: .init(sharpness: 90, reflection: 0.06, softbox: 4.0, diffuse: 0.5, tint: 0),
         cardText: .init(topLeft: [0.86, 0.87, 0.90], topRight: [0.86, 0.87, 0.90],
                         bottomLeft: [0.04, 0.07, 0.13], bottomRight: [0.04, 0.07, 0.13]))
 
     public static let porcelain = Theme(
         name: "Porcelain",
         backgroundTop: [0.80, 0.79, 0.76], backgroundBottom: [0.60, 0.60, 0.58],
-        edge: [0.09, 0.10, 0.12], vertex: [0.07, 0.07, 0.08], face: [0.50, 0.58, 0.68],
+        edge: [0.05, 0.055, 0.06], vertex: [0.07, 0.07, 0.08], face: [0.50, 0.58, 0.68],
         text: [0.12, 0.12, 0.13],
         palette: ([0.40, 0.38, 0.36], [0.22, 0.18, 0.16], [1, 1, 1], [0.05, 0.38, 0.72]),
         ringMix: 0.35, faceAlpha: 0.16, fresnelPower: 2.0, specular: 0.2, fogDensity: 0.03,
@@ -132,7 +143,8 @@ public struct Theme: Sendable {
         rim: [0.26, 0.20, 0.12],
         highlight: [0.60, 0.40, 0.12],     // gold seams (kintsugi); no EDR boost, the look stays as is
         signature: .init(edgeL: 0.42, edgeC: 0.115, vertexL: 0.37, vertexC: 0.095,
-                         faceL: 0.72, faceC: 0.06, faceAlphaScale: 0.85))
+                         faceL: 0.72, faceC: 0.06, faceAlphaScale: 0.85),
+        metal: .init(sharpness: 80, reflection: 0.06, softbox: 4.0, diffuse: 0.5, tint: 0))
 
     public static let brass = Theme(
         name: "Brass",
@@ -146,7 +158,8 @@ public struct Theme: Sendable {
         rim: [0.30, 0.19, 0.08],
         highlight: [1.48, 0.96, 0.46], highlightGain: 2.5, peak: 3.5,    // ember (the original dissolve glow)
         signature: .init(edgeL: 0.74, edgeC: 0.12, vertexL: 0.80, vertexC: 0.10,
-                         faceL: 0.50, faceC: 0.06, faceAlphaScale: 0.9))
+                         faceL: 0.50, faceC: 0.06, faceAlphaScale: 0.9),
+        metal: .init(sharpness: 50, reflection: 0.7, softbox: 0.25, diffuse: 0.45, tint: 0.9))
 
     /// Two light (Porcelain, Sky at dusk is mid-toned), two dark.
     public static let all: [Theme] = [.ink, .sky, .porcelain, .brass]

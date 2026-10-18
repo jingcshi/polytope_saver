@@ -23,6 +23,7 @@ public final class ConfigureSheet: NSObject {
     private let theme = NSPopUpButton()
     private let layout = NSPopUpButton()
     private let fly = NSPopUpButton()
+    private let coloring = NSPopUpButton()
     private let animation = ConfigureSheet.speedSlider()
     private let motion = ConfigureSheet.speedSlider()
     private let rotation = ConfigureSheet.speedSlider()
@@ -85,7 +86,9 @@ public final class ConfigureSheet: NSObject {
         layout.selectItem(at: settings.overlayLayout.rawValue)
         PolychoraSettings.FlyThrough.allCases.forEach { fly.addItem(withTitle: $0.label) }
         fly.selectItem(at: settings.flyThrough.rawValue)
-        for p in [polytope, projection, fly, theme, layout] {
+        PolychoraSettings.Coloring.allCases.forEach { coloring.addItem(withTitle: $0.label) }
+        coloring.selectItem(at: settings.coloring.rawValue)
+        for p in [polytope, projection, fly, theme, coloring, layout] {
             p.widthAnchor.constraint(equalToConstant: Self.popupWidth).isActive = true
         }
         animation.doubleValue = log2(settings.animationSpeed)
@@ -96,7 +99,7 @@ public final class ConfigureSheet: NSObject {
 
         var rows: [[NSView]] = [
             ("Polytope:", polytope), ("Projection:", projection), ("Fly-through:", fly),
-            ("Theme:", theme), ("Info layout:", layout),
+            ("Theme:", theme), ("Edge colours:", coloring), ("Info layout:", layout),
         ].map { [NSTextField(labelWithString: $0.0), $0.1] }
         var sliderLabels: [(NSTextField, NSSlider)] = []
         for (title, slider) in [("Animation speed:", animation), ("Motion speed:", motion), ("Rotation speed:", rotation)] {
@@ -156,6 +159,7 @@ public final class ConfigureSheet: NSObject {
         settings.motionSpeed = Self.speed(of: motion)
         settings.speed = Self.speed(of: rotation)
         settings.flyThrough = .init(rawValue: fly.indexOfSelectedItem) ?? .all
+        settings.coloring = .init(rawValue: coloring.indexOfSelectedItem) ?? .signature
         settings.overlayLayout = .init(rawValue: layout.indexOfSelectedItem) ?? .compact
         settings.showInfo = info.state == .on
         settings.showClock = clock.state == .on

@@ -43,6 +43,15 @@ public struct PolychoraSettings: Sendable {
         }
     }
 
+    public enum Coloring: Int, CaseIterable, Sendable {
+        /// One hue per polytope, rendered in the theme's lightness and chroma.
+        case signature
+        /// Theme base colours with Hopf-ring tinting.
+        case rings
+
+        public var label: String { self == .signature ? "Signature" : "Hopf rings" }
+    }
+
     /// nil cycles through all six.
     public var polytope: PolytopeKind?
     public var projection: Projection = .alternate
@@ -52,6 +61,7 @@ public struct PolychoraSettings: Sendable {
     public var showClock = true
     public var overlayLayout: OverlayLayout = .compact
     public var flyThrough: FlyThrough = .all
+    public var coloring: Coloring = .signature
     /// Still-camera animation (rotation hold, 360° pan, fades, morph): durations scale by 1 / animationSpeed.
     public var animationSpeed: Double = 1
     /// Camera travel (fly-through approach and withdraw): durations scale by 1 / motionSpeed.
@@ -65,7 +75,7 @@ public struct PolychoraSettings: Sendable {
     private enum Key {
         static let polytope = "polytope", projection = "projection", speed = "speed", theme = "theme"
         static let showInfo = "showInfo", showClock = "showClock", layout = "overlayLayout"
-        static let fly = "flyThrough", animation = "animationSpeed", motion = "motionSpeed"
+        static let fly = "flyThrough", animation = "animationSpeed", motion = "motionSpeed", coloring = "coloring"
     }
 
     public static func load(from d: UserDefaults) -> PolychoraSettings {
@@ -78,6 +88,7 @@ public struct PolychoraSettings: Sendable {
         if let v = d.object(forKey: Key.showClock) as? Bool { s.showClock = v }
         if let v = d.object(forKey: Key.animation) as? Double { s.animationSpeed = v }
         if let v = d.object(forKey: Key.motion) as? Double { s.motionSpeed = v }
+        if let v = d.object(forKey: Key.coloring) as? Int, let c = Coloring(rawValue: v) { s.coloring = c }
         if let v = d.object(forKey: Key.layout) as? Int, let l = OverlayLayout(rawValue: v) { s.overlayLayout = l }
         if let v = d.object(forKey: Key.fly) as? Int, let f = FlyThrough(rawValue: v) { s.flyThrough = f }
         return s
@@ -92,6 +103,7 @@ public struct PolychoraSettings: Sendable {
         d.set(showClock, forKey: Key.showClock)
         d.set(animationSpeed, forKey: Key.animation)
         d.set(motionSpeed, forKey: Key.motion)
+        d.set(coloring.rawValue, forKey: Key.coloring)
         d.set(overlayLayout.rawValue, forKey: Key.layout)
         d.set(flyThrough.rawValue, forKey: Key.fly)
         d.synchronize()

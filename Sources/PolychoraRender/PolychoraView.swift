@@ -22,6 +22,7 @@ public final class PolychoraView: NSView, MTKViewDelegate {
         set {
             slideshow.settings = newValue
             renderer.theme = Theme.named(newValue.theme)
+            renderer.coloring = newValue.coloring
             overlay.theme = renderer.theme
             overlay.layout = newValue.overlayLayout
             overlay.showInfo = newValue.showInfo && !isPreview

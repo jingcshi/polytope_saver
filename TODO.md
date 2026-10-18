@@ -14,7 +14,8 @@
 - [ ] Wide gamut (Display P3 primaries) for more saturated palettes. EDR currently uses extended-linear sRGB, so the colours are unchanged.
 - [ ] Polytope materials and textures (next round). Reference: the "Dimensions" film (Jos Leys, Étienne Ghys, Aurélien Alvarez), whose fly-in and pan our camera independently reproduces.
     - [ ] Glass / acrylic texture, see `references/`.
-    - [ ] One signature color palette for each polytope. For instance, red for the 5-cell, blue for the tesseract, yellow for the 16-cell, green for the 24-cell, cyan for the 120 cell, magenta for the 600-cell.
+    - [ ] Faces are too transparent and barely visible; fix as part of the texture pass.
+    - [x] One signature color palette for each polytope: OKLCH hues red 5-cell 29°, blue tesseract 264°, yellow 16-cell 100°, magenta 24-cell 330°, cyan 120-cell 200°, green 600-cell 145° (swapped for a calmer 600-cell). Per-theme lightness and chroma in `Theme.signature`; options sheet "Edge colours: Signature / Hopf rings".
 
 ## Later
 

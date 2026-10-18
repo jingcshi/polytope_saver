@@ -1,4 +1,35 @@
+import Foundation
 import simd
+import PolytopeKit
+
+extension PolytopeKind {
+    /// Signature hue, OKLCH degrees: red 5-cell, blue tesseract, yellow 16-cell, magenta 24-cell,
+    /// cyan 120-cell, green 600-cell.
+    public var signatureHue: Float {
+        switch self {
+        case .cell5: return 29
+        case .cell8: return 264
+        case .cell16: return 100
+        case .cell24: return 330
+        case .cell120: return 200
+        case .cell600: return 145
+        }
+    }
+}
+
+/// OKLCH (Björn Ottosson's Oklab in polar form) to linear sRGB, clamped to the gamut.
+/// Equal L reads as equal lightness across hues, unlike HSV.
+func oklch(_ L: Float, _ C: Float, _ hDegrees: Float) -> SIMD3<Float> {
+    let h = hDegrees * .pi / 180
+    let a = C * cos(h), b = C * sin(h)
+    let l = pow(L + 0.3963377774 * a + 0.2158037573 * b, 3)
+    let m = pow(L - 0.1055613458 * a - 0.0638541728 * b, 3)
+    let s = pow(L - 0.0894841775 * a - 1.2914855480 * b, 3)
+    let rgb = SIMD3<Float>(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+                           -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+                           -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s)
+    return simd_clamp(rgb, .zero, .one)
+}
 
 /// Colours are linear RGB.
 public struct Theme: Sendable {
@@ -39,6 +70,21 @@ public struct Theme: Sendable {
     public var highlightGain: Float = 1
     /// Brightest value highlights may reach, as a multiple of SDR white (also capped by the display).
     public var peak: Float = 1
+    /// How this theme renders the polytopes' signature hues (OKLCH lightness and chroma).
+    public var signature = Signature(edgeL: 0.8, edgeC: 0.07, vertexL: 0.86, vertexC: 0.06,
+                                     faceL: 0.62, faceC: 0.04, faceAlphaScale: 0.85)
+
+    /// Per-theme lightness / chroma for the signature palette; the hue comes from the polytope.
+    public struct Signature: Sendable {
+        public var edgeL, edgeC, vertexL, vertexC, faceL, faceC: Float
+        public var faceAlphaScale: Float
+    }
+
+    /// Edge, vertex and face colours (linear sRGB) for a polytope in this theme's signature palette.
+    public func signatureColors(_ kind: PolytopeKind) -> (edge: SIMD3<Float>, vertex: SIMD3<Float>, face: SIMD3<Float>) {
+        let h = kind.signatureHue, s = signature
+        return (oklch(s.edgeL, s.edgeC, h), oklch(s.vertexL, s.vertexC, h), oklch(s.faceL, s.faceC, h))
+    }
 
     public static let ink = Theme(
         name: "Ink",
@@ -48,19 +94,23 @@ public struct Theme: Sendable {
         palette: ([0.50, 0.48, 0.46], [0.28, 0.24, 0.22], [1, 1, 1], [0.00, 0.33, 0.67]),
         ringMix: 0.6, faceAlpha: 0.10, fresnelPower: 2.5, specular: 0.35, fogDensity: 0.05,
         glow: .horizon(color: [0.016, 0.024, 0.046], y: 0.25, width: 0.18),
-        highlight: [0.62, 0.82, 1.0], highlightGain: 2.2, peak: 3.0)    // cool filament
+        highlight: [0.62, 0.82, 1.0], highlightGain: 2.2, peak: 3.0,    // cool filament
+        signature: .init(edgeL: 0.80, edgeC: 0.075, vertexL: 0.86, vertexC: 0.06,
+                         faceL: 0.62, faceC: 0.05, faceAlphaScale: 0.85))
 
-    /// Dusk: a deeper steel blue above, warm glow at the horizon, as the day approaches sunset.
+    /// Late afternoon: halfway (in sRGB) between a clear day sky and dusk, with a warm horizon.
     public static let sky = Theme(
         name: "Sky",
-        backgroundTop: [0.085, 0.14, 0.29], backgroundBottom: [0.34, 0.33, 0.42],
+        backgroundTop: [0.119, 0.235, 0.461], backgroundBottom: [0.451, 0.511, 0.625],
         edge: [0.05, 0.07, 0.12], vertex: [0.04, 0.05, 0.09], face: [0.92, 0.93, 1.00],
-        text: [0.90, 0.88, 0.85],
+        text: [0.04, 0.07, 0.13],
         palette: ([0.40, 0.42, 0.48], [0.20, 0.18, 0.16], [1, 1, 1], [0.55, 0.85, 0.15]),
         ringMix: 0.3, faceAlpha: 0.16, fresnelPower: 2.0, specular: 0.3, fogDensity: 0.03,
         lightDir: [-0.3, 0.85, 0.45],
-        glow: .horizon(color: [0.30, 0.13, 0.04], y: 0.25, width: 0.18),
-        highlight: [1.0, 0.62, 0.38], highlightGain: 1.6, peak: 2.0)     // sunset peach
+        glow: .horizon(color: [0.258, 0.163, 0.088], y: 0.25, width: 0.18),
+        highlight: [1.0, 0.62, 0.38], highlightGain: 1.6, peak: 2.0,     // sunset peach
+        signature: .init(edgeL: 0.40, edgeC: 0.095, vertexL: 0.36, vertexC: 0.08,
+                         faceL: 0.88, faceC: 0.04, faceAlphaScale: 0.9))
 
     public static let porcelain = Theme(
         name: "Porcelain",
@@ -71,8 +121,10 @@ public struct Theme: Sendable {
         ringMix: 0.35, faceAlpha: 0.16, fresnelPower: 2.0, specular: 0.2, fogDensity: 0.03,
         lightDir: [-0.2, 0.6, -0.35],
         glow: .backlight(color: [0.16, 0.11, 0.05], center: [0.5, 0.52], radius: 0.42),
-        rim: [0.55, 0.42, 0.26],
-        highlight: [0.60, 0.40, 0.12])     // gold seams (kintsugi); no EDR boost, the look stays as is
+        rim: [0.26, 0.20, 0.12],
+        highlight: [0.60, 0.40, 0.12],     // gold seams (kintsugi); no EDR boost, the look stays as is
+        signature: .init(edgeL: 0.42, edgeC: 0.115, vertexL: 0.37, vertexC: 0.095,
+                         faceL: 0.72, faceC: 0.06, faceAlphaScale: 0.85))
 
     public static let brass = Theme(
         name: "Brass",
@@ -83,8 +135,10 @@ public struct Theme: Sendable {
         ringMix: 0.0, faceAlpha: 0.07, fresnelPower: 3.0, specular: 0.8, fogDensity: 0.05,
         lightDir: [-0.3, 0.55, -0.4],
         glow: .backlight(color: [0.038, 0.021, 0.007], center: [0.5, 0.50], radius: 0.40),
-        rim: [0.70, 0.45, 0.18],
-        highlight: [1.48, 0.96, 0.46], highlightGain: 2.5, peak: 3.5)    // ember (the original dissolve glow)
+        rim: [0.30, 0.19, 0.08],
+        highlight: [1.48, 0.96, 0.46], highlightGain: 2.5, peak: 3.5,    // ember (the original dissolve glow)
+        signature: .init(edgeL: 0.74, edgeC: 0.12, vertexL: 0.80, vertexC: 0.10,
+                         faceL: 0.50, faceC: 0.06, faceAlphaScale: 0.9))
 
     /// Two light (Porcelain, Sky at dusk is mid-toned), two dark.
     public static let all: [Theme] = [.ink, .sky, .porcelain, .brass]

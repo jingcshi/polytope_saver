@@ -55,6 +55,7 @@ public final class Renderer {
         case fade
     }
     public var transition: Transition = .dissolve
+    public var coloring: PolychoraSettings.Coloring = .signature
 
     public let device: MTLDevice
     public let sampleCount: Int
@@ -217,6 +218,8 @@ public final class Renderer {
             * lookAt(eye: eye, target: eye + forward, up: [0, 1, 0])
         let t = theme
         let r = m.framing * frame.rotation
+        let signature = coloring == .signature
+        let colors = signature ? t.signatureColors(frame.kind) : (edge: t.edge, vertex: t.vertex, face: t.face)
         func c(_ v: SIMD3<Float>) -> SIMD4<Float> { SIMD4<Float>(v, 1) }
         // EDR: highlights roll off towards min(theme peak, display headroom); the highlight gain only
         // applies to the extent the display has headroom, so SDR output is unchanged.
@@ -229,12 +232,12 @@ public final class Renderer {
             cameraPos: c(eye),
             proj: [d, s, d, 0.02],
             radii: [m.edgeRadius, m.edgeRadius * 1.4, Float(frame.fade), 0],
-            fog: [t.fogDensity, 0.15, 0.9, t.faceAlpha],
+            fog: [t.fogDensity, 0.15, 0.9, signature ? t.faceAlpha * t.signature.faceAlphaScale : t.faceAlpha],
             bgTop: c(t.backgroundTop), bgBottom: c(t.backgroundBottom),
-            edgeColor: c(t.edge), vertexColor: c(t.vertex), faceColor: c(t.face),
+            edgeColor: c(colors.edge), vertexColor: c(colors.vertex), faceColor: c(colors.face),
             lightDir: SIMD4<Float>(t.lightDir, 0),
             palA: c(t.palette.a), palB: c(t.palette.b), palC: c(t.palette.c), palD: c(t.palette.d),
-            style: [t.ringMix, t.fresnelPower, t.specular, transition == .dissolve ? 1 : 0],
+            style: [signature ? 0 : t.ringMix, t.fresnelPower, t.specular, transition == .dissolve ? 1 : 0],
             viewport: [Float(size.width), Float(size.height), 1 / tan(fovY / 2), 0],
             pole: [2.5, 3, 9, 0],
             glow: t.glowUniforms.0, glowShape: t.glowUniforms.1,

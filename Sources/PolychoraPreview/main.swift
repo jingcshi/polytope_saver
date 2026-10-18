@@ -33,6 +33,7 @@ if let out = argument("--snapshot") {
     let device = MTLCreateSystemDefaultDevice()!
     let renderer = try Renderer(device: device, sampleCount: 4, shaderSource: loadShader)
     renderer.theme = Theme.named(settings.theme)
+    if argument("--coloring") == "rings" { renderer.coloring = .rings }
     let show = Slideshow(settings: settings, randomStart: false)
     show.seek(timeline: 10, rotation: time)
     show.overrideStereo(Double(argument("--stereo") ?? "0") ?? 0)

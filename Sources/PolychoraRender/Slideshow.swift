@@ -14,12 +14,25 @@ public struct FrameState {
     public var approach: Double = 0
     /// Panorama yaw at the projection centre, radians.
     public var yaw: Double = 0
+    public var stage: Stage = .view
+
+    /// What the phase indicator shows; changes on events (spin-down done, withdraw done, morph start)
+    /// rather than tracking the numbers.
+    public enum Stage: Sendable { case view, flyThrough, transition }
 
     public var projectionLabel: String {
         switch stereo {
         case ..<0.001: return "perspective projection"
         case 0.999...: return "stereographic projection"
         default: return "perspective → stereographic"
+        }
+    }
+
+    public var phaseLabel: String {
+        switch stage {
+        case .view: return projectionLabel
+        case .flyThrough: return (stereo < 0.5 ? "perspective" : "stereographic") + " fly-through"
+        case .transition: return "perspective → stereographic"
         }
     }
 }
@@ -105,6 +118,17 @@ public final class Slideshow {
 
     private struct Sample {
         var spin = 1.0, stereo = 0.0, fade = 1.0, approach = 0.0, yaw = 0.0
+        var stage = FrameState.Stage.view
+    }
+
+    /// Stage once phase `kind` has completed, given the stage before it.
+    private static func stage(after kind: Kind, from s: FrameState.Stage) -> FrameState.Stage {
+        switch kind {
+        case .fly: return .flyThrough
+        case .morph: return .transition
+        case .rotate: return .view
+        case .fadeIn, .fadeOut: return s
+        }
     }
 
     /// State at time `tau` into a polytope's segment.
@@ -114,11 +138,13 @@ public final class Slideshow {
         var s = Sample()
         var start = 0.0
         var spinStart = 0.0
+        var stage = FrameState.Stage.view
         for (i, ph) in list.enumerated() {
             let end = start + ph.duration
             if tau < end || i == list.count - 1 {
                 let local = tau - start
                 s.stereo = ph.stereo
+                s.stage = ph.kind == .fly && local < dur.spin ? stage : Self.stage(after: ph.kind, from: stage)
                 s.spin = rampUp((tau - spinStart) / dur.spin)
                 switch ph.kind {
                 case .fadeIn:
@@ -147,6 +173,7 @@ public final class Slideshow {
                 return s
             }
             if ph.kind == .fly { spinStart = end }
+            stage = Self.stage(after: ph.kind, from: stage)
             start = end
         }
         return s
@@ -206,7 +233,8 @@ public final class Slideshow {
         return FrameState(kind: kind, rotation: drift * base * natural.matrix(angle),
                           stereo: stereoOverride ?? s.stereo, fade: s.fade,
                           approach: cameraOverride?.approach ?? s.approach,
-                          yaw: cameraOverride?.yaw ?? s.yaw)
+                          yaw: cameraOverride?.yaw ?? s.yaw,
+                          stage: stereoOverride == nil ? s.stage : .view)
     }
 }
 

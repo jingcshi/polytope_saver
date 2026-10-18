@@ -15,6 +15,27 @@ import PolytopeKit
         }
     }
 
+    /// The phase label advances on spin-down done, withdraw done, morph done and spin-down done again.
+    @Test func phaseLabelFollowsStages() {
+        var s = PolychoraSettings()
+        s.polytope = .cell5
+        s.projection = .alternate
+        s.flyThrough = .all
+        let show = Slideshow(settings: s, randomStart: false)
+        // fade-in 1.5, hold 36, fly 2 + 9 + 36 + 9 (to 93.5), morph 5, hold 36 (to 134.5), fly (to 190.5), fade-out.
+        let expected: [(Double, String)] = [
+            (20, "perspective projection"), (38, "perspective projection"),
+            (40, "perspective fly-through"), (93, "perspective fly-through"),
+            (94, "perspective → stereographic"), (98, "perspective → stereographic"),
+            (99, "stereographic projection"), (135, "stereographic projection"),
+            (137, "stereographic fly-through"), (191, "stereographic fly-through"),
+        ]
+        for (t, label) in expected {
+            show.seek(timeline: t, rotation: 0)
+            #expect(show.frame().phaseLabel == label, "t = \(t)")
+        }
+    }
+
     /// Rotation stops for the whole camera move and the camera returns to rest.
     @Test func flyThroughFreezesRotation() {
         var s = PolychoraSettings()

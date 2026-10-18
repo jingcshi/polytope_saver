@@ -73,6 +73,12 @@ public struct Theme: Sendable {
     /// How this theme renders the polytopes' signature hues (OKLCH lightness and chroma).
     public var signature = Signature(edgeL: 0.8, edgeC: 0.07, vertexL: 0.86, vertexC: 0.06,
                                      faceL: 0.62, faceC: 0.04, faceAlphaScale: 0.85)
+    /// Info card text colours where the background differs by corner; nil uses `text` everywhere.
+    public var cardText: CardText?
+
+    public struct CardText: Sendable {
+        public var topLeft, topRight, bottomLeft, bottomRight: SIMD3<Float>
+    }
 
     /// Per-theme lightness / chroma for the signature palette; the hue comes from the polytope.
     public struct Signature: Sendable {
@@ -110,7 +116,9 @@ public struct Theme: Sendable {
         glow: .horizon(color: [0.258, 0.163, 0.088], y: 0.25, width: 0.18),
         highlight: [1.0, 0.62, 0.38], highlightGain: 1.6, peak: 2.0,     // sunset peach
         signature: .init(edgeL: 0.40, edgeC: 0.095, vertexL: 0.36, vertexC: 0.08,
-                         faceL: 0.88, faceC: 0.04, faceAlphaScale: 0.9))
+                         faceL: 0.88, faceC: 0.04, faceAlphaScale: 0.9),
+        cardText: .init(topLeft: [0.86, 0.87, 0.90], topRight: [0.86, 0.87, 0.90],
+                        bottomLeft: [0.04, 0.07, 0.13], bottomRight: [0.04, 0.07, 0.13]))
 
     public static let porcelain = Theme(
         name: "Porcelain",

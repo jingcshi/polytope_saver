@@ -15,7 +15,7 @@ public struct PolychoraSettings: Sendable {
     }
 
     public enum OverlayLayout: Int, CaseIterable, Sendable {
-        /// Single info card bottom left, clock bottom right.
+        /// Deprecated. Single info card bottom left, clock bottom right.
         case compact
         /// Title, projection, geometry table and clock in the four corners.
         case quadrants
@@ -59,7 +59,8 @@ public struct PolychoraSettings: Sendable {
     public var theme: String = Theme.ink.name
     public var showInfo = true
     public var showClock = true
-    public var overlayLayout: OverlayLayout = .compact
+    /// Not loaded from defaults: compact is deprecated and only reachable from the preview app.
+    public var overlayLayout: OverlayLayout = .quadrants
     public var flyThrough: FlyThrough = .all
     public var coloring: Coloring = .signature
     /// Still-camera animation (rotation hold, 360° pan, fades, morph): durations scale by 1 / animationSpeed.
@@ -89,7 +90,6 @@ public struct PolychoraSettings: Sendable {
         if let v = d.object(forKey: Key.animation) as? Double { s.animationSpeed = v }
         if let v = d.object(forKey: Key.motion) as? Double { s.motionSpeed = v }
         if let v = d.object(forKey: Key.coloring) as? Int, let c = Coloring(rawValue: v) { s.coloring = c }
-        if let v = d.object(forKey: Key.layout) as? Int, let l = OverlayLayout(rawValue: v) { s.overlayLayout = l }
         if let v = d.object(forKey: Key.fly) as? Int, let f = FlyThrough(rawValue: v) { s.flyThrough = f }
         return s
     }

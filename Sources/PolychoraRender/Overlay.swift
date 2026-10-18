@@ -25,7 +25,7 @@ final class OverlayView: NSView {
 
     var polytope: (PolytopeKind) -> Polytope = { Polytope.make($0) }
     var theme: Theme = .ink { didSet { invalidate() } }
-    var layout: PolychoraSettings.OverlayLayout = .compact { didSet { invalidate() } }
+    var layout: PolychoraSettings.OverlayLayout = .quadrants { didSet { invalidate() } }
     var showInfo = true { didSet { invalidate() } }
     var showClock = true { didSet { clock.isHidden = !showClock } }
 
@@ -53,19 +53,27 @@ final class OverlayView: NSView {
     private var unit: CGFloat { max(min(bounds.width, bounds.height), 200) / 1000 }
     private var margin: CGFloat { 40 * unit }
 
-    private var textColor: NSColor {
-        let c = theme.text
+    private func textColor(_ corner: Corner) -> NSColor {
+        var c = theme.text
+        if let t = theme.cardText {
+            switch corner {
+            case .topLeft: c = t.topLeft
+            case .topRight: c = t.topRight
+            case .bottomLeft: c = t.bottomLeft
+            case .bottomRight: c = t.bottomRight
+            }
+        }
         return NSColor(srgbRed: CGFloat(linearToSRGB(c.x)), green: CGFloat(linearToSRGB(c.y)),
                        blue: CGFloat(linearToSRGB(c.z)), alpha: 1)
     }
 
-    private func style(_ size: CGFloat, _ weight: NSFont.Weight, _ alpha: CGFloat, kern: CGFloat = 0,
+    private func style(_ corner: Corner, _ size: CGFloat, _ weight: NSFont.Weight, _ alpha: CGFloat, kern: CGFloat = 0,
                        monospacedDigits: Bool = false, para: NSParagraphStyle? = nil) -> [NSAttributedString.Key: Any] {
         let p = (para?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
         p.lineSpacing = 4 * unit
         let font = monospacedDigits ? NSFont.monospacedDigitSystemFont(ofSize: size * unit, weight: weight)
                                     : NSFont.systemFont(ofSize: size * unit, weight: weight)
-        return [.font: font, .foregroundColor: textColor.withAlphaComponent(alpha),
+        return [.font: font, .foregroundColor: textColor(corner).withAlphaComponent(alpha),
                 .kern: kern * unit, .paragraphStyle: p]
     }
 
@@ -80,7 +88,7 @@ final class OverlayView: NSView {
 
     func update(_ frame: FrameState) {
         let scale = window?.backingScaleFactor ?? 2
-        let key = "\(frame.kind.rawValue)|\(frame.projectionLabel)|\(bounds.size)|\(scale)|\(layout)|\(showInfo)"
+        let key = "\(frame.kind.rawValue)|\(frame.phaseLabel)|\(bounds.size)|\(scale)|\(layout)|\(showInfo)"
         if key != infoKey {
             infoKey = key
             infoLayers.forEach { $0.contentsScale = scale }
@@ -90,9 +98,9 @@ final class OverlayView: NSView {
             case .compact:
                 place(info, compactText(frame), .bottomLeft)
             case .quadrants:
-                place(title, titleText(frame), .topLeft)
-                place(projection, NSAttributedString(string: frame.projectionLabel,
-                                                     attributes: style(14, .regular, 0.5, kern: 0.6)), .topRight)
+                place(title, titleText(frame, .topLeft), .topLeft)
+                place(projection, NSAttributedString(string: frame.phaseLabel,
+                                                     attributes: style(.topRight, 14, .regular, 0.5, kern: 0.6)), .topRight)
                 place(table, tableText(frame), .bottomLeft)
             }
         }
@@ -106,7 +114,7 @@ final class OverlayView: NSView {
             clock.contentsScale = scale
             let s = NSAttributedString(string: now, attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 72 * unit, weight: .light),
-                .foregroundColor: textColor.withAlphaComponent(0.8),
+                .foregroundColor: textColor(.bottomRight).withAlphaComponent(0.8),
                 .kern: 2 * unit,
             ])
             place(clock, s, .bottomRight, dy: -6 * unit)
@@ -137,25 +145,25 @@ final class OverlayView: NSView {
         return (p.vertices.count, p.edges.count, p.faces.count, p.cells.count)
     }
 
-    private func titleText(_ frame: FrameState) -> NSMutableAttributedString {
+    private func titleText(_ frame: FrameState, _ corner: Corner) -> NSMutableAttributedString {
         let i = frame.kind.info
         let s = NSMutableAttributedString()
-        s.append(NSAttributedString(string: i.name + "\n", attributes: style(40, .light, 0.9, kern: 0.5)))
-        s.append(NSAttributedString(string: "\(i.altName)   \(i.schlafli)", attributes: style(18, .regular, 0.7, kern: 1)))
+        s.append(NSAttributedString(string: i.name + "\n", attributes: style(corner, 40, .light, 0.9, kern: 0.5)))
+        s.append(NSAttributedString(string: "\(i.altName)   \(i.schlafli)", attributes: style(corner, 18, .regular, 0.7, kern: 1)))
         return s
     }
 
     private func compactText(_ frame: FrameState) -> NSAttributedString {
         let i = frame.kind.info
         let p = counts(frame.kind)
-        let s = titleText(frame)
-        s.append(NSAttributedString(string: "\n", attributes: style(14, .regular, 0, kern: 1)))
-        s.append(NSAttributedString(string: "\n", attributes: style(6, .regular, 0)))
-        let body = style(14, .regular, 0.8, kern: 0.6)
+        let s = titleText(frame, .bottomLeft)
+        s.append(NSAttributedString(string: "\n", attributes: style(.bottomLeft, 14, .regular, 0, kern: 1)))
+        s.append(NSAttributedString(string: "\n", attributes: style(.bottomLeft, 6, .regular, 0)))
+        let body = style(.bottomLeft, 14, .regular, 0.8, kern: 0.6)
         s.append(NSAttributedString(string: "\(n(p.v)) vertices · \(n(p.e)) edges · \(n(p.f)) faces · \(n(p.c)) cells\n", attributes: body))
         s.append(NSAttributedString(string: "cells: \(i.cellType) · vertex figure: \(i.vertexFigure)\n", attributes: body))
         s.append(NSAttributedString(string: "symmetry \(i.symmetry), order \(n(i.symmetryOrder)) · dual: \(i.dual)\n", attributes: body))
-        s.append(NSAttributedString(string: frame.projectionLabel, attributes: style(14, .regular, 0.5, kern: 0.6)))
+        s.append(NSAttributedString(string: frame.phaseLabel, attributes: style(.bottomLeft, 14, .regular, 0.5, kern: 0.6)))
         return s
     }
 
@@ -172,8 +180,8 @@ final class OverlayView: NSView {
             ("symmetry", i.symmetry, "order", n(i.symmetryOrder)),
             ("3D analogue", i.analogue, "dual", i.dual),
         ]
-        let label = style(14, .regular, 0.5, kern: 0.6)
-        let value = style(14, .regular, 0.8, kern: 0.6, monospacedDigits: true)
+        let label = style(.bottomLeft, 14, .regular, 0.5, kern: 0.6)
+        let value = style(.bottomLeft, 14, .regular, 0.8, kern: 0.6, monospacedDigits: true)
         func width(_ s: String, _ a: [NSAttributedString.Key: Any]) -> CGFloat { NSAttributedString(string: s, attributes: a).size().width }
         let w0 = rows.map { width($0.0, label) }.max()!
         let w1 = rows.map { width($0.1, value) }.max()!
@@ -184,8 +192,8 @@ final class OverlayView: NSView {
         para.tabStops = [NSTextTab(textAlignment: .right, location: c1),
                          NSTextTab(textAlignment: .left, location: c2),
                          NSTextTab(textAlignment: .left, location: c3)]
-        let labelP = style(14, .regular, 0.5, kern: 0.6, para: para)
-        let valueP = style(14, .regular, 0.8, kern: 0.6, monospacedDigits: true, para: para)
+        let labelP = style(.bottomLeft, 14, .regular, 0.5, kern: 0.6, para: para)
+        let valueP = style(.bottomLeft, 14, .regular, 0.8, kern: 0.6, monospacedDigits: true, para: para)
 
         let s = NSMutableAttributedString()
         for (k, r) in rows.enumerated() {

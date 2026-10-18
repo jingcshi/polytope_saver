@@ -21,7 +21,6 @@ public final class ConfigureSheet: NSObject {
     private let polytope = NSPopUpButton()
     private let projection = NSPopUpButton()
     private let theme = NSPopUpButton()
-    private let layout = NSPopUpButton()
     private let fly = NSPopUpButton()
     private let coloring = NSPopUpButton()
     private let animation = ConfigureSheet.speedSlider()
@@ -82,13 +81,11 @@ public final class ConfigureSheet: NSObject {
         projection.selectItem(at: settings.projection.rawValue)
         Theme.all.forEach { theme.addItem(withTitle: $0.name) }
         theme.selectItem(withTitle: settings.theme)
-        PolychoraSettings.OverlayLayout.allCases.forEach { layout.addItem(withTitle: $0.label) }
-        layout.selectItem(at: settings.overlayLayout.rawValue)
         PolychoraSettings.FlyThrough.allCases.forEach { fly.addItem(withTitle: $0.label) }
         fly.selectItem(at: settings.flyThrough.rawValue)
         PolychoraSettings.Coloring.allCases.forEach { coloring.addItem(withTitle: $0.label) }
         coloring.selectItem(at: settings.coloring.rawValue)
-        for p in [polytope, projection, fly, theme, coloring, layout] {
+        for p in [polytope, projection, fly, theme, coloring] {
             p.widthAnchor.constraint(equalToConstant: Self.popupWidth).isActive = true
         }
         animation.doubleValue = log2(settings.animationSpeed)
@@ -99,7 +96,7 @@ public final class ConfigureSheet: NSObject {
 
         var rows: [[NSView]] = [
             ("Polytope:", polytope), ("Projection:", projection), ("Fly-through:", fly),
-            ("Theme:", theme), ("Edge colours:", coloring), ("Info layout:", layout),
+            ("Theme:", theme), ("Edge colours:", coloring),
         ].map { [NSTextField(labelWithString: $0.0), $0.1] }
         var sliderLabels: [(NSTextField, NSSlider)] = []
         for (title, slider) in [("Animation speed:", animation), ("Motion speed:", motion), ("Rotation speed:", rotation)] {
@@ -160,7 +157,6 @@ public final class ConfigureSheet: NSObject {
         settings.speed = Self.speed(of: rotation)
         settings.flyThrough = .init(rawValue: fly.indexOfSelectedItem) ?? .all
         settings.coloring = .init(rawValue: coloring.indexOfSelectedItem) ?? .signature
-        settings.overlayLayout = .init(rawValue: layout.indexOfSelectedItem) ?? .compact
         settings.showInfo = info.state == .on
         settings.showClock = clock.state == .on
         onSave(settings)

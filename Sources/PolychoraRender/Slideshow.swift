@@ -52,7 +52,7 @@ public final class Slideshow {
                          approach: Base.approach * m, panorama: Base.panorama * a, withdraw: Base.withdraw * m)
     }
     /// Seconds for the natural rotation to advance by one symmetry period at speed 1.
-    public let periodSeconds = 10.0
+    public let periodSeconds = 15.0
 
     private(set) public var timelineTime: Double = 0
     private(set) public var rotationTime: Double = 0

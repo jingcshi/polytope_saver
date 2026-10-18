@@ -27,6 +27,8 @@ struct Uniforms {
     var glow: SIMD4<Float>
     var glowShape: SIMD4<Float>
     var rimLight: SIMD4<Float>
+    var highlight: SIMD4<Float>
+    var hdr: SIMD4<Float>
 }
 
 /// Layout mirrors `Instance` in Polychora.metal.
@@ -38,8 +40,21 @@ struct Instance {
 }
 
 public final class Renderer {
-    public static let colorFormat = MTLPixelFormat.bgra8Unorm_srgb
     public static let depthFormat = MTLPixelFormat.depth32Float
+    /// EDR output is float16 in extended-linear sRGB (same primaries as before, values may exceed 1);
+    /// SDR output (snapshots) is 8-bit sRGB.
+    public let hdr: Bool
+    public var colorFormat: MTLPixelFormat { hdr ? .rgba16Float : .bgra8Unorm_srgb }
+    /// Current EDR headroom of the target display (1 = SDR).
+    public var headroom: Float = 1
+
+    public enum Transition {
+        /// Edges, vertices and faces burn away along 4D noise attached to the polytope.
+        case dissolve
+        /// Deprecated: plain cross-fade of the whole frame to the background. Kept for comparison.
+        case fade
+    }
+    public var transition: Transition = .dissolve
 
     public let device: MTLDevice
     public let sampleCount: Int
@@ -74,10 +89,14 @@ public final class Renderer {
         let faces: MTLBuffer
         let faceCount: Int
         let edgeRadius: Float
+        /// Keyring framing: takes a cell centroid to the projection pole (0,0,0,1), so the pole sits on
+        /// that centroid's Hopf fibre and every vertex ring stays bounded in the stereographic view.
+        let framing: Mat4
     }
 
-    public init(device: MTLDevice, sampleCount: Int, precompiledLibrary: URL? = nil,
+    public init(device: MTLDevice, sampleCount: Int, hdr: Bool = false, precompiledLibrary: URL? = nil,
                 shaderSource: @escaping () throws -> String) throws {
+        self.hdr = hdr
         self.precompiledLibrary = precompiledLibrary
         self.device = device
         self.sampleCount = sampleCount
@@ -120,12 +139,14 @@ public final class Renderer {
             library = try device.makeLibrary(source: try shaderSource(), options: options)
         }
 
-        func pipeline(_ vs: String, _ fs: String, blend: Bool, depth: Bool = true) throws -> MTLRenderPipelineState {
+        func pipeline(_ vs: String, _ fs: String, blend: Bool, depth: Bool = true,
+                      alphaToCoverage: Bool = false) throws -> MTLRenderPipelineState {
             let d = MTLRenderPipelineDescriptor()
             d.vertexFunction = library.makeFunction(name: vs)
             d.fragmentFunction = library.makeFunction(name: fs)
             d.rasterSampleCount = sampleCount
-            d.colorAttachments[0].pixelFormat = Self.colorFormat
+            d.isAlphaToCoverageEnabled = alphaToCoverage && sampleCount > 1
+            d.colorAttachments[0].pixelFormat = colorFormat
             d.depthAttachmentPixelFormat = Self.depthFormat
             if blend {
                 let c = d.colorAttachments[0]!
@@ -140,8 +161,8 @@ public final class Renderer {
         pipelines = Pipelines(
             background: try pipeline("background_vs", "background_fs", blend: false),
             fade: try pipeline("background_vs", "fade_fs", blend: true),
-            edge: try pipeline("edge_vs", "opaque_fs", blend: false),
-            vertex: try pipeline("vertex_vs", "opaque_fs", blend: false),
+            edge: try pipeline("edge_vs", "opaque_fs", blend: false, alphaToCoverage: true),
+            vertex: try pipeline("vertex_vs", "opaque_fs", blend: false, alphaToCoverage: true),
             face: try pipeline("face_vs", "face_fs", blend: true))
     }
 
@@ -172,7 +193,8 @@ public final class Renderer {
             device.makeBuffer(bytes: a, length: MemoryLayout<Instance>.stride * a.count)!
         }
         let m = Model(polytope: p, edges: buffer(edges), vertices: buffer(verts), faces: buffer(tris),
-                      faceCount: tris.count, edgeRadius: Float(0.02 * pow(p.edgeLength, 0.4)))
+                      faceCount: tris.count, edgeRadius: Float(0.016 * pow(p.edgeLength, 0.4)),
+                      framing: Rotation4.aligning(p.cellCentres[0], to: Vec4(0, 0, 0, 1)))
         models[kind] = m
         return m
     }
@@ -190,27 +212,35 @@ public final class Renderer {
         let yaw = Float(frame.yaw)
         let forward = SIMD3<Float>(-sin(yaw), 0, -cos(yaw))
         let aspect = Float(size.width / max(size.height, 1))
-        let viewProj = perspective(fovY: 38 * .pi / 180, aspect: aspect, near: 0.01, far: 100)
+        let fovY: Float = 38 * .pi / 180
+        let viewProj = perspective(fovY: fovY, aspect: aspect, near: 0.01, far: 100)
             * lookAt(eye: eye, target: eye + forward, up: [0, 1, 0])
         let t = theme
+        let r = m.framing * frame.rotation
         func c(_ v: SIMD3<Float>) -> SIMD4<Float> { SIMD4<Float>(v, 1) }
+        // EDR: highlights roll off towards min(theme peak, display headroom); the highlight gain only
+        // applies to the extent the display has headroom, so SDR output is unchanged.
+        let ceiling = max(1, min(t.peak, headroom))
+        let hdrActive = min(max(headroom - 1, 0), 1)
         return Uniforms(
-            rot4: simd_float4x4(columns: (SIMD4<Float>(frame.rotation.columns.0), SIMD4<Float>(frame.rotation.columns.1),
-                                          SIMD4<Float>(frame.rotation.columns.2), SIMD4<Float>(frame.rotation.columns.3))),
+            rot4: simd_float4x4(columns: (SIMD4<Float>(r.columns.0), SIMD4<Float>(r.columns.1),
+                                          SIMD4<Float>(r.columns.2), SIMD4<Float>(r.columns.3))),
             viewProj: viewProj,
             cameraPos: c(eye),
             proj: [d, s, d, 0.02],
-            radii: [m.edgeRadius, m.edgeRadius * 1.6, Float(frame.fade), 0],
+            radii: [m.edgeRadius, m.edgeRadius * 1.4, Float(frame.fade), 0],
             fog: [t.fogDensity, 0.15, 0.9, t.faceAlpha],
             bgTop: c(t.backgroundTop), bgBottom: c(t.backgroundBottom),
             edgeColor: c(t.edge), vertexColor: c(t.vertex), faceColor: c(t.face),
             lightDir: SIMD4<Float>(t.lightDir, 0),
             palA: c(t.palette.a), palB: c(t.palette.b), palC: c(t.palette.c), palD: c(t.palette.d),
-            style: [t.ringMix, t.fresnelPower, t.specular, 0],
-            viewport: [Float(size.width), Float(size.height), 0, 0],
+            style: [t.ringMix, t.fresnelPower, t.specular, transition == .dissolve ? 1 : 0],
+            viewport: [Float(size.width), Float(size.height), 1 / tan(fovY / 2), 0],
             pole: [2.5, 3, 9, 0],
             glow: t.glowUniforms.0, glowShape: t.glowUniforms.1,
-            rimLight: SIMD4<Float>(t.rim, 0))
+            rimLight: SIMD4<Float>(t.rim, 0),
+            highlight: SIMD4<Float>(t.highlight, t.highlightGain),
+            hdr: [ceiling, hdrActive, 0, 0])
     }
 
     public func encode(_ frame: FrameState, pass: MTLRenderPassDescriptor, size: CGSize,
@@ -244,7 +274,7 @@ public final class Renderer {
         enc.setRenderPipelineState(p.face)
         draw(grid, m.faces, count: m.faceCount)
 
-        if frame.fade < 0.999 {
+        if transition == .fade, frame.fade < 0.999 {
             enc.setDepthStencilState(depthOff)
             enc.setRenderPipelineState(p.fade)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
@@ -274,10 +304,11 @@ public final class Renderer {
             d.storageMode = storage
             return device.makeTexture(descriptor: d)!
         }
-        let resolve = texture(Self.colorFormat, samples: 1, usage: [.renderTarget, .shaderRead], storage: .shared)
+        precondition(!hdr, "snapshots read back 8-bit sRGB; use an SDR renderer")
+        let resolve = texture(colorFormat, samples: 1, usage: [.renderTarget, .shaderRead], storage: .shared)
         let pass = MTLRenderPassDescriptor()
         if sampleCount > 1 {
-            pass.colorAttachments[0].texture = texture(Self.colorFormat, samples: sampleCount, usage: .renderTarget, storage: .private)
+            pass.colorAttachments[0].texture = texture(colorFormat, samples: sampleCount, usage: .renderTarget, storage: .private)
             pass.colorAttachments[0].resolveTexture = resolve
             pass.colorAttachments[0].storeAction = .multisampleResolve
         } else {

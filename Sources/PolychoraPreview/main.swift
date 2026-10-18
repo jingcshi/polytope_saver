@@ -8,7 +8,7 @@ import PolytopeKit
 //
 //   PolychoraPreview
 //   PolychoraPreview --snapshot out.png [--kind 120] [--stereo 1] [--time 12] [--theme Ink] [--size 1600x1000] [--overlay quadrants|compact]
-//                    [--approach 0…1] [--yaw degrees]
+//                    [--approach 0…1] [--yaw degrees] [--fade 0…1 transition progress]
 
 let shaderURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -39,10 +39,12 @@ if let out = argument("--snapshot") {
     show.overrideCamera(approach: Double(argument("--approach") ?? "0") ?? 0,
                         yaw: (Double(argument("--yaw") ?? "0") ?? 0) * .pi / 180)
 
-    var snapshot = renderer.snapshot(show.frame(), width: dims[0], height: dims[1])
+    var frame = show.frame()
+    if let f = argument("--fade").flatMap(Double.init) { frame.fade = f }
+    var snapshot = renderer.snapshot(frame, width: dims[0], height: dims[1])
     if let layout = argument("--overlay"), let shot = snapshot {
         settings.overlayLayout = layout == "compact" ? .compact : .quadrants
-        snapshot = renderer.compositeOverlay(show.frame(), settings: settings, onto: shot)
+        snapshot = renderer.compositeOverlay(frame, settings: settings, onto: shot)
     }
     guard let image = snapshot,
           let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil)

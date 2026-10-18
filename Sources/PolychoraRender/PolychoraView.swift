@@ -34,8 +34,8 @@ public final class PolychoraView: NSView, MTKViewDelegate {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         let samples = isPreview ? 1 : 4
         do {
-            renderer = try Renderer(device: device, sampleCount: samples, precompiledLibrary: precompiledLibrary,
-                                    shaderSource: shaderSource)
+            renderer = try Renderer(device: device, sampleCount: samples, hdr: !isPreview,
+                                    precompiledLibrary: precompiledLibrary, shaderSource: shaderSource)
         } catch {
             NSLog("Polychora: renderer init failed: \(error)")
             return nil
@@ -46,7 +46,11 @@ public final class PolychoraView: NSView, MTKViewDelegate {
         overlay = OverlayView(frame: NSRect(origin: .zero, size: frame.size))
         super.init(frame: frame)
 
-        mtkView.colorPixelFormat = Renderer.colorFormat
+        mtkView.colorPixelFormat = renderer.colorFormat
+        if renderer.hdr {
+            mtkView.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)
+            (mtkView.layer as? CAMetalLayer)?.wantsExtendedDynamicRangeContent = true
+        }
         mtkView.depthStencilPixelFormat = Renderer.depthFormat
         mtkView.sampleCount = samples
         mtkView.preferredFramesPerSecond = isPreview ? 30 : 120
@@ -180,6 +184,9 @@ public final class PolychoraView: NSView, MTKViewDelegate {
         lastTime = now
         if !paused { slideshow.advance(by: dt) }
         let frame = slideshow.frame()
+        if renderer.hdr {
+            renderer.headroom = Float(coveredScreen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)
+        }
         if renderer.draw(frame, in: view) {
             if missedFrames > 0 || renderedFrames == 0 {
                 log.info("rendering (after \(self.missedFrames) missed frames)")

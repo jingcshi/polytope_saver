@@ -25,6 +25,22 @@ public enum Rotation4 {
         ])
     }
 
+    /// The rotation in the plane of unit vectors `a` and `b` that takes `a` to `b`:
+    /// R = I − (a+b)(a+b)ᵀ / (1 + a·b) + 2·b·aᵀ.
+    public static func aligning(_ a: Vec4, to b: Vec4) -> Mat4 {
+        func outer(_ u: Vec4, _ v: Vec4) -> Mat4 { Mat4(columns: (u * v[0], u * v[1], u * v[2], u * v[3])) }
+        let c = simd_dot(a, b)
+        if c > 1 - 1e-12 { return Mat4(diagonal: Vec4(repeating: 1)) }
+        if c < -1 + 1e-12 {
+            // Antipodal: half-turn in a plane containing a.
+            let axis = abs(a[0]) < 0.9 ? Vec4(1, 0, 0, 0) : Vec4(0, 1, 0, 0)
+            let n = simd_normalize(axis - simd_dot(axis, a) * a)
+            return Mat4(diagonal: Vec4(repeating: 1)) - 2 * outer(a, a) - 2 * outer(n, n)
+        }
+        let s = a + b
+        return Mat4(diagonal: Vec4(repeating: 1)) - outer(s, s) * (1 / (1 + c)) + 2 * outer(b, a)
+    }
+
     /// exp(θu) for a unit pure quaternion u.
     public static func quaternionExp(axis u: SIMD3<Double>, angle: Double) -> Vec4 {
         let n = simd_normalize(u)

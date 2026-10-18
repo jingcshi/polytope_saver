@@ -16,13 +16,25 @@ struct Uniforms {
     float4 faceColor;
     float4 lightDir;
     float4 palA, palB, palC, palD;
-    float4 style;       // ringMix, fresnelPower, specular, unused
-    float4 viewport;    // width, height
+    float4 style;       // ringMix, fresnelPower, specular, transition (0 legacy fade, 1 dissolve)
+    float4 viewport;    // width, height (pixels), focal length 1/tan(fovY/2)
     float4 pole;        // radius cap (in λ), pole-fog start λ, pole-fog end λ
     float4 glow;        // rgb, mode (0 none, 1 horizon band, 2 backlight halo)
     float4 glowShape;   // centre x, centre y (uv), width / radius (screen heights)
     float4 rimLight;    // rgb (colour × strength)
+    float4 highlight;   // rgb: the theme's "highlight" (dissolve glow), w: EDR highlight gain
+    float4 hdr;         // x: highlight ceiling = min(theme peak, display headroom), y: EDR active 0…1
 };
+
+// EDR gain for highlights; 1 on SDR displays.
+static float highlightGain(constant Uniforms& u) { return 1.0 + (u.highlight.w - 1.0) * u.hdr.y; }
+
+// Values above 1 roll off exponentially towards the ceiling (hard clip at 1 on SDR).
+static float3 toneCeiling(float3 c, constant Uniforms& u) {
+    float k = u.hdr.x - 1.0;
+    if (k < 1e-3) return min(c, 1.0);
+    return min(c, 1.0) + k * (1.0 - exp(-max(c - 1.0, 0.0) / k));
+}
 
 struct Instance {
     float4 a;
@@ -38,7 +50,21 @@ struct VOut {
     float3 color;
     float valid;
     float lambda;
+    float4 obj;         // unrotated 4D position, so the dissolve pattern stays attached to the polytope
+    float coverage;     // < 1 for tubes/spheres thinner than the pixel floor (alpha-to-coverage)
 };
+
+// Thin far tubes alias under MSAA. Floor the radius at `minPx` pixels and report the true
+// fraction as coverage, which alpha-to-coverage turns into partial sample coverage.
+struct Floored { float radius; float coverage; };
+static Floored pixelFloor(float3 centre, float r, float minPx, constant Uniforms& u) {
+    float w = max((u.viewProj * float4(centre, 1.0)).w, 1e-4);
+    float pxPerUnit = 0.5 * u.viewport.y * u.viewport.z / w;
+    Floored f;
+    f.coverage = saturate(r * pxPerUnit / minPx);
+    f.radius = max(r, minPx / pxPerUnit);
+    return f;
+}
 
 struct Projected { float3 p; float lambda; float valid; };
 
@@ -81,9 +107,49 @@ static float3 shade(float3 base, float3 n, float3 world, float specK, constant U
     float key = max(dot(n, L), 0.0);
     float hemi = 0.5 + 0.5 * n.y;
     float3 H = normalize(L + V);
-    float spec = pow(max(dot(n, H), 0.0), 40.0) * specK;
+    float spec = pow(max(dot(n, H), 0.0), 40.0) * specK * highlightGain(u);
     float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
     return base * (0.62 * key + 0.30 * hemi + 0.12) + spec + 0.25 * rim * base + u.rimLight.xyz * rim;
+}
+
+// MARK: Dissolve transition
+
+static float hash4(float4 p) {
+    p = fract(p * float4(0.1031, 0.1030, 0.0973, 0.1099));
+    p += dot(p, p.wzxy + 33.33);
+    return fract((p.x + p.y) * (p.z + p.w));
+}
+
+// 4D value noise: smooth interpolation of hashed lattice values over the 16 corners of the cell.
+static float noise4(float4 p) {
+    float4 i = floor(p), f = fract(p);
+    float4 w = f * f * (3.0 - 2.0 * f);
+    float r = 0.0;
+    for (int k = 0; k < 16; k++) {
+        float4 o = float4(k & 1, (k >> 1) & 1, (k >> 2) & 1, (k >> 3) & 1);
+        float4 s = mix(1.0 - w, w, o);
+        r += hash4(i + o) * s.x * s.y * s.z * s.w;
+    }
+    return r;
+}
+
+// Progress is radii.z (1 = fully present). Fragments whose noise exceeds the threshold are gone;
+// a thin band just inside it glows. Returns the glow amount.
+// `lead` > 0 makes an element leave earlier and return later (faces go first, then the frame).
+static float dissolve(float4 obj, float lead, constant Uniforms& u) {
+    if (u.style.w < 0.5 || u.radii.z > 0.999) return 0.0;
+    float n = 0.65 * noise4(obj * 3.0 + 11.0) + 0.35 * noise4(obj * 7.0 - 5.0);
+    n = saturate((n - 0.22) / 0.56);    // value noise clusters around 0.5; spread it over [0, 1]
+    const float band = 0.05;
+    float progress = saturate((u.radii.z - lead) / (1.0 - lead));
+    float k = progress * (1.0 + band);
+    if (k <= 0.0 || n > k) discard_fragment();
+    return smoothstep(k - band, k, n);
+}
+
+// The dissolve front takes the theme's highlight colour (ember for Brass, gold seams for Porcelain…).
+static float3 ember(float3 c, float glow, constant Uniforms& u) {
+    return mix(c, u.highlight.xyz * highlightGain(u), glow);
 }
 
 // MARK: Background
@@ -126,7 +192,7 @@ fragment float4 background_fs(BgOut in [[stage_in]], constant Uniforms& u [[buff
     return float4(backgroundColor(in.uv, in.position, u), 1.0);
 }
 
-// Cross-fade to background during slideshow transitions.
+// Deprecated: plain cross-fade to background, superseded by the dissolve. Used only with transition = fade.
 fragment float4 fade_fs(BgOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
     float a = 1.0 - u.radii.z;
     return float4(backgroundColor(in.uv, in.position, u) * a, a);
@@ -153,15 +219,18 @@ vertex VOut edge_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     N1 = normalize(N1);
     float3 N2 = cross(T, N1);
     float3 n = cos(tv.y) * N1 + sin(tv.y) * N2;
-    float3 world = c.p + n * (u.radii.x * min(c.lambda, u.pole.x));
+    Floored r = pixelFloor(c.p, u.radii.x * min(c.lambda, u.pole.x), 0.7, u);
+    float3 world = c.p + n * r.radius;
 
     VOut o;
+    o.coverage = r.coverage;
     o.position = u.viewProj * float4(world, 1.0);
     o.world = world;
     o.normal = n;
     o.color = ringColor(e.info.x, u.style.x, u.edgeColor.xyz, u);
     o.valid = c.valid * c0.valid * c1.valid;
     o.lambda = c.lambda;
+    o.obj = mix(e.a, e.b, tv.x);
     return o;
 }
 
@@ -174,21 +243,25 @@ vertex VOut vertex_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 n = tmpl[vid];
     Instance v = inst[iid];
     Projected c = project4(u.rot4 * v.a, u);
-    float3 world = c.p + n * (u.radii.y * min(c.lambda, u.pole.x));
+    Floored r = pixelFloor(c.p, u.radii.y * min(c.lambda, u.pole.x), 0.9, u);
+    float3 world = c.p + n * r.radius;
     VOut o;
+    o.coverage = r.coverage;
     o.position = u.viewProj * float4(world, 1.0);
     o.world = world;
     o.normal = n;
     o.color = ringColor(v.info.x, u.style.x, u.vertexColor.xyz, u);
     o.valid = c.valid;
     o.lambda = c.lambda;
+    o.obj = v.a;
     return o;
 }
 
 fragment float4 opaque_fs(VOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
     if (in.valid < 0.999 || in.lambda > u.pole.z) discard_fragment();
+    float glow = dissolve(in.obj, 0.0, u);
     float3 c = shade(in.color, normalize(in.normal), in.world, u.style.z, u);
-    return float4(applyFog(c, in.world, in.lambda, u), 1.0);
+    return float4(toneCeiling(applyFog(ember(c, glow, u), in.world, in.lambda, u), u), in.coverage);
 }
 
 // MARK: Faces (subdivided triangles, curved onto S³ by the blend)
@@ -212,11 +285,14 @@ vertex VOut face_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.color = ringColor(f.info.x, u.style.x, u.faceColor.xyz, u);
     o.valid = q.valid;
     o.lambda = q.lambda;
+    o.obj = f.a + bc.x * (f.b - f.a) + bc.y * (f.c - f.a);
+    o.coverage = 1.0;
     return o;
 }
 
 fragment float4 face_fs(VOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
     if (in.valid < 0.999 || in.lambda > u.pole.z) discard_fragment();
+    float glow = 0.5 * dissolve(in.obj, 0.35, u);
     float3 n = normalize(in.normal);
     float3 V = normalize(u.cameraPos.xyz - in.world);
     float facing = abs(dot(n, V));
@@ -225,6 +301,7 @@ fragment float4 face_fs(VOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]
     float dist = length(u.cameraPos.xyz - in.world);
     alpha *= smoothstep(u.fog.y, u.fog.z, dist) * poleVisibility(in.lambda, u);
     float3 c = shade(in.color, n, in.world, u.style.z * 0.5, u);
-    c = applyFog(c, in.world, in.lambda, u);
+    c = toneCeiling(applyFog(ember(c, glow, u), in.world, in.lambda, u), u);
+    alpha = mix(alpha, 0.5, glow);
     return float4(c * alpha, alpha);
 }

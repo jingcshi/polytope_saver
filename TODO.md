@@ -11,13 +11,10 @@
 
 ## Now
 
-- [ ] Transition polish: the cross-fade is a plain fade to background; consider a 4D "dissolve" or zoom.
-- [ ] Antialiasing of thin far tubes (MSAA 4× now); maybe line-width floor in pixels.
-- [ ] Info card drift for burn-in safety on external OLEDs.
-- [ ] Stereographic framing: choose the base orientation so a Hopf ring passes through the pole (tunnel fly-through) vs. ring-torus side view.
-- [ ] EDR / wide gamut output for highlights.
+- [ ] Wide gamut (Display P3 primaries) for more saturated palettes. EDR currently uses extended-linear sRGB, so the colours are unchanged.
 - [ ] Polytope materials and textures (next round). Reference: the "Dimensions" film (Jos Leys, Étienne Ghys, Aurélien Alvarez), whose fly-in and pan our camera independently reproduces.
-    - [ ] Glass / acrylic texture [reference media 1](https://en.wikipedia.org/wiki/120-cell#/media/File:120-cell_perspective-cell-first-02.png), [reference media 2](https://en.wikipedia.org/wiki/120-cell#/media/File:120-cell.gif)
+    - [ ] Glass / acrylic texture, see `references/`.
+    - [ ] One signature color palette for each polytope. For instance, red for the 5-cell, blue for the tesseract, yellow for the 16-cell, green for the 24-cell, cyan for the 120 cell, magenta for the 600-cell.
 
 ## Later
 
@@ -88,6 +85,11 @@
 
 ## Done
 
+- [x] Dissolve transition (4D noise on unrotated coordinates; faces leave first; per-theme highlight front). The plain fade is kept as deprecated.
+- [x] Pixel-floor antialiasing (0.7 px tubes, 0.9 px spheres, alpha-to-coverage); tubes and spheres 20% thinner.
+- [x] Overlay billiard drift for burn-in protection.
+- [x] Keyring framing: a cell centroid at the projection pole, so no vertex reaches it (tested).
+- [x] EDR output with per-theme highlight gain and peak; dusk Sky; Brass halo at 50%.
 - [x] Appex preview detection verified. The thumbnail gives `preview (no didstart, Settings in front)`; the Preview button and a hot corner give `full (didstart)`. Rule: `com.apple.screensaver.didstart` within 3 s of attach means full; otherwise wait 0.3 s, and System Settings frontmost means preview.
 - [x] Theme backgrounds, phase 1: Sky added (two light, two dark themes). Ink and Sky have a horizontal glow band, calibrated. Porcelain and Brass have a warm backlight halo and a rim light; Porcelain as designed, Brass's halo cut to 65%.
 - [x] Speed controls regrouped by perception: Animation / Motion / Rotation sliders (slow → fast, Flurry-style ticked sliders with captions); options sheet sized by its contents (fixed control widths) so System Settings no longer clips it.

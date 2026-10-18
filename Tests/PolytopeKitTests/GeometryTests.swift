@@ -52,6 +52,26 @@ private let expected: [PolytopeKind: (v: Int, e: Int, f: Int, c: Int, faceSize: 
         #expect(abs((180 - normalAngle) - kind.info.dichoralAngle) < 1e-3)
     }
 
+    /// Keyring framing: with a cell centroid at the projection pole, the point at the pole over a
+    /// full turn of the natural rotation traces the fibre through that centroid and never meets a vertex.
+    @Test(arguments: PolytopeKind.allCases)
+    func keyringPoleAvoidsVertices(_ kind: PolytopeKind) {
+        let p = Polytope.make(kind)
+        let pole = Vec4(0, 0, 0, 1)
+        let frame = Rotation4.aligning(p.cellCentres[0], to: pole)
+        #expect(simd_distance(frame * p.cellCentres[0], pole) < 1e-9)
+        #expect(abs(simd_determinant(frame) - 1) < 1e-9)
+        let (rotation, _) = kind.naturalRotation
+        var closest = Double.infinity
+        for k in 0..<2000 {
+            // Object-space point shown at the pole when the rendered matrix is frame · R(θ).
+            let m = frame * rotation.matrix(2 * .pi * Double(k) / 2000)
+            let atPole = m.inverse * pole
+            for v in p.vertices { closest = min(closest, simd_distance(v, atPole)) }
+        }
+        #expect(closest > 0.1 * p.edgeLength)
+    }
+
     /// The natural rotation by one period is a symmetry, and its orbits partition evenly.
     @Test(arguments: PolytopeKind.allCases)
     func naturalRotationIsSymmetry(_ kind: PolytopeKind) {

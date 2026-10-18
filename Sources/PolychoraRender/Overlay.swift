@@ -97,6 +97,7 @@ final class OverlayView: NSView {
             }
         }
         infoLayers.forEach { $0.opacity = Float(frame.fade) }
+        drift(scale: scale)
 
         let now = clockFormatter.string(from: Date())
         let ckey = "\(now)|\(bounds.size)|\(scale)|\(layout)"
@@ -110,6 +111,23 @@ final class OverlayView: NSView {
             ])
             place(clock, s, .bottomRight, dy: -6 * unit)
         }
+    }
+
+    /// Burn-in protection: all text slides along a billiard path inside a ±12-unit box (within the
+    /// 40-unit margin). Closed form from wall-clock time; offsets snap to device pixels to keep text crisp.
+    private func drift(scale: CGFloat) {
+        let half = 12 * unit
+        let t = Date().timeIntervalSinceReferenceDate
+        func bounce(_ speed: Double) -> CGFloat {
+            let s = (speed * Double(unit) * t).truncatingRemainder(dividingBy: Double(4 * half))
+            return CGFloat(abs(s - Double(2 * half))) - half    // triangle wave in [−half, half]
+        }
+        let dx = (bounce(0.13) * scale).rounded() / scale
+        let dy = (bounce(0.08) * scale).rounded() / scale
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.sublayerTransform = CATransform3DMakeTranslation(dx, dy, 0)
+        CATransaction.commit()
     }
 
     private func n(_ x: Int) -> String { String(x) }

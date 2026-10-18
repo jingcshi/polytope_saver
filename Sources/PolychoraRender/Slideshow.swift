@@ -31,7 +31,8 @@ public struct FrameState {
 public final class Slideshow {
     public var settings: PolychoraSettings { didSet { rebuildOrder() } }
 
-    /// Durations at pace 1 (holdSeconds = 30); all scale with `settings.pace`.
+    /// Durations at pace 1. View phases scale with `settings.pace` (holdSeconds / 30),
+    /// fly-through steps with `settings.flyPace` (flySeconds / 35).
     private enum Base {
         static let morph = 8.0, fade = 3.0
         static let spinUp = 3.0, spinDown = 3.0
@@ -63,7 +64,7 @@ public final class Slideshow {
     private enum Kind { case fadeIn, rotate, morph, fly, fadeOut }
     private struct Phase { let kind: Kind; let duration: Double; let stereo: Double }
 
-    private var flySeconds: Double { (Base.spinDown + Base.approach + Base.panorama + Base.withdraw) * settings.pace }
+    private var flySeconds: Double { (Base.spinDown + Base.approach + Base.panorama + Base.withdraw) * settings.flyPace }
 
     private func phases(_ kind: PolytopeKind) -> [Phase] {
         let p = settings.pace, h = settings.holdSeconds
@@ -119,7 +120,8 @@ public final class Slideshow {
                     s.fade = 1 - smoothstep(0, ph.duration, local)
                     if i > 0, list[i - 1].kind == .fly { s.spin = 0 }
                 case .fly:
-                    let d = Base.spinDown * p, a = Base.approach * p, pano = Base.panorama * p, w = Base.withdraw * p
+                    let f = settings.flyPace
+                    let d = Base.spinDown * f, a = Base.approach * f, pano = Base.panorama * f, w = Base.withdraw * f
                     s.spin = rampDown(local / d)
                     if local < d {
                         break

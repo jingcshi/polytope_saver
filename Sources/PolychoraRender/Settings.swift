@@ -52,17 +52,20 @@ public struct PolychoraSettings: Sendable {
     public var showClock = true
     public var overlayLayout: OverlayLayout = .compact
     public var flyThrough: FlyThrough = .all
-    /// Seconds of free rotation per view. Also the global pace dial: every phase and
-    /// fly-through step scales by `holdSeconds / 30`.
+    /// Seconds of free rotation per view. Also the view pace dial: fades, morph and spin-up
+    /// scale by `holdSeconds / 30`.
     public var holdSeconds: Double = 30
     public var pace: Double { holdSeconds / 30 }
+    /// Total fly-through duration; its four steps scale by `flySeconds / 35`.
+    public var flySeconds: Double = 35
+    public var flyPace: Double { flySeconds / 35 }
 
     public init() {}
 
     private enum Key {
         static let polytope = "polytope", projection = "projection", speed = "speed", theme = "theme"
         static let showInfo = "showInfo", showClock = "showClock", hold = "holdSeconds", layout = "overlayLayout"
-        static let fly = "flyThrough"
+        static let fly = "flyThrough", flySeconds = "flySeconds"
     }
 
     public static func load(from d: UserDefaults) -> PolychoraSettings {
@@ -76,6 +79,7 @@ public struct PolychoraSettings: Sendable {
         if let v = d.object(forKey: Key.hold) as? Double { s.holdSeconds = v }
         if let v = d.object(forKey: Key.layout) as? Int, let l = OverlayLayout(rawValue: v) { s.overlayLayout = l }
         if let v = d.object(forKey: Key.fly) as? Int, let f = FlyThrough(rawValue: v) { s.flyThrough = f }
+        if let v = d.object(forKey: Key.flySeconds) as? Double { s.flySeconds = v }
         return s
     }
 
@@ -89,6 +93,7 @@ public struct PolychoraSettings: Sendable {
         d.set(holdSeconds, forKey: Key.hold)
         d.set(overlayLayout.rawValue, forKey: Key.layout)
         d.set(flyThrough.rawValue, forKey: Key.fly)
+        d.set(flySeconds, forKey: Key.flySeconds)
         d.synchronize()
     }
 }

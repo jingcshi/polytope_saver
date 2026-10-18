@@ -41,6 +41,32 @@ import PolytopeKit
         #expect(show.rotationTime > r0)
     }
 
+    /// Doubling the fly-through length stretches only the camera move; the view before it is unchanged.
+    @Test func flyPaceIsIndependentOfViewPace() {
+        func approachWindow(fly: Double) -> (start: Double, end: Double) {
+            var s = PolychoraSettings()
+            s.polytope = .cell600
+            s.projection = .perspective
+            s.flySeconds = fly
+            let show = Slideshow(settings: s, randomStart: false)
+            var start = Double.nan, end = Double.nan
+            for k in 0..<20000 {
+                let t = Double(k) * 0.01
+                show.seek(timeline: t, rotation: 0)
+                let a = show.frame().approach
+                if a > 0, start.isNaN { start = t }
+                if a > 0 { end = t } else if !start.isNaN { break }
+            }
+            return (start, end)
+        }
+        let base = approachWindow(fly: 35), long = approachWindow(fly: 70)
+        // fade-in 1.5 + rotate 30, then spin-down 3·f; the camera moves for 32·f.
+        #expect(abs(base.start - 34.5) < 0.02)
+        #expect(abs(long.start - 37.5) < 0.02)
+        #expect(abs((base.end - base.start) - 32) < 0.05)
+        #expect(abs((long.end - long.start) - 64) < 0.05)
+    }
+
     @Test func noFlyThroughForSmallPolytopesInLargeMode() {
         var s = PolychoraSettings()
         s.polytope = .cell8

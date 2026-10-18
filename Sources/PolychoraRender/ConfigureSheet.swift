@@ -22,13 +22,14 @@ public final class ConfigureSheet: NSObject {
     private let fly = NSPopUpButton()
     private let speed = NSSlider(value: 1, minValue: 0.25, maxValue: 3, target: nil, action: nil)
     private let hold = NSSlider(value: 30, minValue: 10, maxValue: 120, target: nil, action: nil)
+    private let flyLength = NSSlider(value: 35, minValue: 15, maxValue: 120, target: nil, action: nil)
     private let info = NSButton(checkboxWithTitle: "Show info card", target: nil, action: nil)
     private let clock = NSButton(checkboxWithTitle: "Show clock", target: nil, action: nil)
 
     public init(settings: PolychoraSettings, onSave: @escaping (PolychoraSettings) -> Void) {
         self.settings = settings
         self.onSave = onSave
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 420, height: 360))
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 504, height: 392))
         view = stack
         super.init()
 
@@ -45,6 +46,7 @@ public final class ConfigureSheet: NSObject {
         fly.selectItem(at: settings.flyThrough.rawValue)
         speed.doubleValue = settings.speed
         hold.doubleValue = settings.holdSeconds
+        flyLength.doubleValue = settings.flySeconds
         info.state = settings.showInfo ? .on : .off
         clock.state = settings.showClock ? .on : .off
 
@@ -53,20 +55,23 @@ public final class ConfigureSheet: NSObject {
         }
         let grid = NSGridView(views: [
             row("Polytope:", polytope), row("Projection:", projection), row("Fly-through:", fly), row("Theme:", theme), row("Info layout:", layout),
-            row("Rotation speed:", speed), row("Seconds per view:", hold),
+            row("Rotation speed:", speed), row("Seconds per view:", hold), row("Fly-through seconds:", flyLength),
             [NSGridCell.emptyContentView, info], [NSGridCell.emptyContentView, clock],
         ])
         grid.column(at: 0).xPlacement = .trailing
         grid.rowSpacing = 10
+        for s in [speed, hold, flyLength] { grid.cell(for: s)?.xPlacement = .fill }
+        stack.widthAnchor.constraint(equalToConstant: stack.frame.width).isActive = true
 
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed))
         cancel.keyEquivalent = "\u{1b}"
         let ok = NSButton(title: "OK", target: self, action: #selector(okPressed))
         ok.keyEquivalent = "\r"
-        let buttons = NSStackView(views: [cancel, ok])
+        let buttons = NSStackView()
+        buttons.setViews([cancel, ok], in: .trailing)
         stack.setViews([grid, buttons], in: .leading)
         stack.orientation = .vertical
-        stack.alignment = .trailing
+        stack.alignment = .width
         stack.spacing = 20
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
     }
@@ -90,6 +95,7 @@ public final class ConfigureSheet: NSObject {
         settings.theme = theme.titleOfSelectedItem ?? Theme.ink.name
         settings.speed = speed.doubleValue
         settings.holdSeconds = hold.doubleValue.rounded()
+        settings.flySeconds = flyLength.doubleValue.rounded()
         settings.flyThrough = .init(rawValue: fly.indexOfSelectedItem) ?? .all
         settings.overlayLayout = .init(rawValue: layout.indexOfSelectedItem) ?? .compact
         settings.showInfo = info.state == .on

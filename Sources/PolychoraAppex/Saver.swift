@@ -48,7 +48,7 @@ final class SaverConfigurationViewController: ScreenSaverConfigurationViewContro
         s.onDismiss = { [weak self] in self?.configureSheetDidEnd() }
         sheet = s
         view = s.view
-        preferredContentSize = s.view.fittingSize
+        preferredContentSize = NSSize(width: s.view.frame.width, height: s.view.fittingSize.height)
     }
 }
 

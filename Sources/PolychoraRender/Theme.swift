@@ -82,6 +82,14 @@ public struct Theme: Sendable {
     public struct Metal: Sendable {
         public var sharpness, reflection, softbox, diffuse, tint: Float
     }
+    /// Faces: solid glass in perspective, morphing into soap-film bubbles in stereographic projection.
+    public var glass = Glass(glassAlpha: 0.18, bubbleAlpha: 0.06, seam: 0.02)
+
+    /// `glassAlpha` / `bubbleAlpha`: face-on opacity of each material (both rise at grazing angles);
+    /// `seam`: brightness of the glass's polygon-border seams.
+    public struct Glass: Sendable {
+        public var glassAlpha, bubbleAlpha, seam: Float
+    }
     /// Info card text colours where the background differs by corner; nil uses `text` everywhere.
     public var cardText: CardText?
 

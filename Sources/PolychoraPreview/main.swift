@@ -45,6 +45,7 @@ if let out = argument("--snapshot") {
     var snapshot = renderer.snapshot(frame, width: dims[0], height: dims[1])
     if let layout = argument("--overlay"), let shot = snapshot {
         settings.overlayLayout = layout == "compact" ? .compact : .quadrants
+        settings.showFPS = CommandLine.arguments.contains("--fps")
         snapshot = renderer.compositeOverlay(frame, settings: settings, onto: shot)
     }
     guard let image = snapshot,
@@ -127,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "v": update { $0.flyThrough = .init(rawValue: ($0.flyThrough.rawValue + 1) % 3)! }
         case "l": update { $0.overlayLayout = .init(rawValue: ($0.overlayLayout.rawValue + 1) % 2)! }
         case "c": update { $0.showClock.toggle() }
+        case "g": update { $0.showFPS.toggle() }
         case "=", "+": update { $0.speed = min($0.speed * 1.25, 8) }
         case "-": update { $0.speed = max($0.speed / 1.25, 0.1) }
         case " ": view.paused.toggle()
@@ -141,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func printHelp() {
         print("""
         keys: ←/→ prev/next · 1-6 pick polytope · 0 cycle all · p projection mode · t theme
-              i info · l info layout · v fly-through · c clock · +/- speed · space pause · r reload shaders · f fullscreen · h help
+              i info · l info layout · v fly-through · c clock · g frame rate · +/- speed · space pause · r reload shaders · f fullscreen · h help
         shader: \(shaderURL.path) (auto-reloads on save)
         """)
     }

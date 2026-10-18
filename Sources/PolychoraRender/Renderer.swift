@@ -31,6 +31,7 @@ struct Uniforms {
     var hdr: SIMD4<Float>
     var metal: SIMD4<Float>
     var metalTint: SIMD4<Float>
+    var glass: SIMD4<Float>
 }
 
 /// Layout mirrors `Instance` in Polychora.metal.
@@ -72,11 +73,31 @@ public final class Renderer {
 
     private let tube: Mesh
     private let sphere: Mesh
-    private let grid: Mesh
     private var models: [PolytopeKind: Model] = [:]
 
     private struct Pipelines {
-        let background, fade, edge, vertex, face: MTLRenderPipelineState
+        let background, fade, edge, vertex, face, composite: MTLRenderPipelineState
+    }
+
+    /// Weighted blended order-independent transparency (McGuire & Bavoil 2013) for the faces.
+    /// Both targets are memoryless: they live in tile memory for the duration of the pass only.
+    static let accumFormat = MTLPixelFormat.rgba16Float
+    static let revealFormat = MTLPixelFormat.r16Float
+    private var oitTargets: (accum: MTLTexture, reveal: MTLTexture)?
+
+    private func oit(width: Int, height: Int) -> (accum: MTLTexture, reveal: MTLTexture) {
+        if let t = oitTargets, t.accum.width == width, t.accum.height == height { return t }
+        func make(_ format: MTLPixelFormat) -> MTLTexture {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
+            d.textureType = sampleCount > 1 ? .type2DMultisample : .type2D
+            d.sampleCount = sampleCount
+            d.usage = .renderTarget
+            d.storageMode = .memoryless
+            return device.makeTexture(descriptor: d)!
+        }
+        let t = (accum: make(Self.accumFormat), reveal: make(Self.revealFormat))
+        oitTargets = t
+        return t
     }
 
     private struct Mesh {
@@ -91,6 +112,7 @@ public final class Renderer {
         let vertices: MTLBuffer
         let faces: MTLBuffer
         let faceCount: Int
+        let grid: Mesh
         let edgeRadius: Float
         /// Keyring framing: takes a cell centroid to the projection pole (0,0,0,1), so the pole sits on
         /// that centroid's Hopf fibre and every vertex ring stays bounded in the stereographic view.
@@ -116,16 +138,25 @@ public final class Renderer {
         depthRead = depthState(.less, write: false)
         depthOff = depthState(.always, write: false)
 
-        func mesh<V: BitwiseCopyable>(_ m: (vertices: [V], indices: [UInt32])) -> Mesh {
-            Mesh(vertices: device.makeBuffer(bytes: m.vertices, length: MemoryLayout<V>.stride * m.vertices.count)!,
-                 indices: device.makeBuffer(bytes: m.indices, length: 4 * m.indices.count)!,
-                 indexCount: m.indices.count)
-        }
-        tube = mesh(Meshes.tube(segments: 32, sides: 10))
-        sphere = mesh(Meshes.sphere(subdivisions: 2))
-        grid = mesh(Meshes.triangleGrid(level: 8))
+        tube = Self.mesh(device, Meshes.tube(segments: 32, sides: 10))
+        sphere = Self.mesh(device, Meshes.sphere(subdivisions: 2))
 
         try reloadShaders()
+    }
+
+    private static func mesh<V: BitwiseCopyable>(_ device: MTLDevice, _ m: (vertices: [V], indices: [UInt32])) -> Mesh {
+        Mesh(vertices: device.makeBuffer(bytes: m.vertices, length: MemoryLayout<V>.stride * m.vertices.count)!,
+             indices: device.makeBuffer(bytes: m.indices, length: 4 * m.indices.count)!,
+             indexCount: m.indices.count)
+    }
+
+    /// Face tessellation, shared by polytopes with the same level.
+    private var grids: [Int: Mesh] = [:]
+    private func grid(level: Int) -> Mesh {
+        if let g = grids[level] { return g }
+        let g = Self.mesh(device, Meshes.triangleGrid(level: level))
+        grids[level] = g
+        return g
     }
 
     /// Shipped builds use a precompiled metallib; development compiles from source for hot reload.
@@ -142,14 +173,17 @@ public final class Renderer {
             library = try device.makeLibrary(source: try shaderSource(), options: options)
         }
 
-        func pipeline(_ vs: String, _ fs: String, blend: Bool, depth: Bool = true,
-                      alphaToCoverage: Bool = false) throws -> MTLRenderPipelineState {
+        // Every pipeline declares the two OIT attachments (the pass always has them); only faces write them.
+        func pipeline(_ vs: String, _ fs: String, blend: Bool, alphaToCoverage: Bool = false,
+                      accumulate: Bool = false) throws -> MTLRenderPipelineState {
             let d = MTLRenderPipelineDescriptor()
             d.vertexFunction = library.makeFunction(name: vs)
             d.fragmentFunction = library.makeFunction(name: fs)
             d.rasterSampleCount = sampleCount
             d.isAlphaToCoverageEnabled = alphaToCoverage && sampleCount > 1
             d.colorAttachments[0].pixelFormat = colorFormat
+            d.colorAttachments[1].pixelFormat = Self.accumFormat
+            d.colorAttachments[2].pixelFormat = Self.revealFormat
             d.depthAttachmentPixelFormat = Self.depthFormat
             if blend {
                 let c = d.colorAttachments[0]!
@@ -159,6 +193,20 @@ public final class Renderer {
                 c.destinationRGBBlendFactor = .oneMinusSourceAlpha
                 c.destinationAlphaBlendFactor = .oneMinusSourceAlpha
             }
+            if accumulate {
+                d.colorAttachments[0].writeMask = []
+                let a = d.colorAttachments[1]!    // Σ w·(premultiplied colour, α)
+                a.isBlendingEnabled = true
+                a.sourceRGBBlendFactor = .one; a.sourceAlphaBlendFactor = .one
+                a.destinationRGBBlendFactor = .one; a.destinationAlphaBlendFactor = .one
+                let r = d.colorAttachments[2]!    // Π (1 − α)
+                r.isBlendingEnabled = true
+                r.sourceRGBBlendFactor = .zero; r.sourceAlphaBlendFactor = .zero
+                r.destinationRGBBlendFactor = .oneMinusSourceColor; r.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            } else {
+                d.colorAttachments[1].writeMask = []
+                d.colorAttachments[2].writeMask = []
+            }
             return try device.makeRenderPipelineState(descriptor: d)
         }
         pipelines = Pipelines(
@@ -166,7 +214,8 @@ public final class Renderer {
             fade: try pipeline("background_vs", "fade_fs", blend: true),
             edge: try pipeline("edge_vs", "opaque_fs", blend: false, alphaToCoverage: true),
             vertex: try pipeline("vertex_vs", "opaque_fs", blend: false, alphaToCoverage: true),
-            face: try pipeline("face_vs", "face_fs", blend: true))
+            face: try pipeline("face_vs", "face_fs", blend: false, accumulate: true),
+            composite: try pipeline("background_vs", "oit_composite_fs", blend: true))
     }
 
     private func model(_ kind: PolytopeKind) -> Model {
@@ -187,16 +236,23 @@ public final class Renderer {
         for (fi, face) in p.faces.enumerated() {
             let cr = p.cellRing[p.faceCells[fi].x]
             let ring: Float = p.cellRingCount > 1 && cr == p.cellRing[p.faceCells[fi].y] ? Float(cr) / cellRings : -1
+            // Fan triangle (a, b, c): bc is always on the polygon border; ab only for the first
+            // triangle (flag 1), ac only for the last (flag 2).
             for k in 1..<(face.count - 1) {
+                let border = (k == 1 ? 1 : 0) + (k == face.count - 2 ? 2 : 0)
                 tris.append(Instance(a: f4(p.vertices[face[0]]), b: f4(p.vertices[face[k]]),
-                                     c: f4(p.vertices[face[k + 1]]), info: [ring, Float(fi), 0, 0]))
+                                     c: f4(p.vertices[face[k + 1]]), info: [ring, Float(fi), Float(border), 0]))
             }
         }
         func buffer(_ a: [Instance]) -> MTLBuffer {
             device.makeBuffer(bytes: a, length: MemoryLayout<Instance>.stride * a.count)!
         }
         let m = Model(polytope: p, edges: buffer(edges), vertices: buffer(verts), faces: buffer(tris),
-                      faceCount: tris.count, edgeRadius: Float(0.0096 * pow(p.edgeLength, 0.4)),
+                      faceCount: tris.count,
+                      // Same grid spacing on S³ for every polytope (≈ 0.04 of the unit radius), so large
+                      // stereographic bubbles keep a smooth silhouette.
+                      grid: grid(level: min(max(Int((p.edgeLength / 0.04).rounded(.up)), 8), 48)),
+                      edgeRadius: Float(0.012 * pow(p.edgeLength, 0.4)),
                       framing: Rotation4.aligning(p.cellCentres[0], to: Vec4(0, 0, 0, 1)))
         models[kind] = m
         return m
@@ -247,12 +303,23 @@ public final class Renderer {
             highlight: SIMD4<Float>(t.highlight, t.highlightGain),
             hdr: [ceiling, hdrActive, 0, 0],
             metal: [t.metal.sharpness, t.metal.reflection, t.metal.softbox, t.metal.diffuse],
-            metalTint: [t.metal.tint, 0, 0, 0])
+            metalTint: [t.metal.tint, 0, 0, 0],
+            glass: [t.glass.glassAlpha, t.glass.bubbleAlpha, t.glass.seam, 0])
     }
 
     public func encode(_ frame: FrameState, pass: MTLRenderPassDescriptor, size: CGSize,
                        commandBuffer: MTLCommandBuffer) {
-        guard let p = pipelines, let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        guard let p = pipelines, let target = pass.colorAttachments[0].texture else { return }
+        let t = oit(width: target.width, height: target.height)
+        for (i, tex, clear) in [(1, t.accum, MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)),
+                                (2, t.reveal, MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1))] {
+            let a = pass.colorAttachments[i]!
+            a.texture = tex
+            a.loadAction = .clear
+            a.storeAction = .dontCare
+            a.clearColor = clear
+        }
+        guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
         let m = model(frame.kind)
         var u = uniforms(frame, model: m, size: size)
         let uSize = MemoryLayout<Uniforms>.stride
@@ -279,7 +346,11 @@ public final class Renderer {
         enc.setDepthStencilState(depthRead)
         enc.setCullMode(.none)
         enc.setRenderPipelineState(p.face)
-        draw(grid, m.faces, count: m.faceCount)
+        draw(m.grid, m.faces, count: m.faceCount)
+
+        enc.setDepthStencilState(depthOff)
+        enc.setRenderPipelineState(p.composite)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
         if transition == .fade, frame.fade < 0.999 {
             enc.setDepthStencilState(depthOff)
@@ -332,7 +403,7 @@ public final class Renderer {
         encode(frame, pass: pass, size: CGSize(width: width, height: height), commandBuffer: cb)
         cb.commit()
         cb.waitUntilCompleted()
-
+        
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         resolve.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }

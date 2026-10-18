@@ -26,6 +26,7 @@ struct Uniforms {
     float4 hdr;         // x: highlight ceiling = min(theme peak, display headroom), y: EDR active 0…1
     float4 metal;       // specular exponent, reflection, softbox, diffuse
     float4 metalTint;   // x: how far reflections take the base colour (0 steel, 1 brass)
+    float4 glass;       // glass alpha, bubble alpha, seam brightness
 };
 
 // EDR gain for highlights; 1 on SDR displays.
@@ -302,10 +303,21 @@ fragment float4 opaque_fs(VOut in [[stage_in]], constant Uniforms& u [[buffer(0)
 
 // MARK: Faces (subdivided triangles, curved onto S³ by the blend)
 
-vertex VOut face_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
-                    const device float2* tmpl [[buffer(0)]],
-                    const device Instance* inst [[buffer(1)]],
-                    constant Uniforms& u [[buffer(2)]]) {
+struct FaceOut {
+    float4 position [[position]];
+    float3 world;
+    float3 normal;
+    float3 color;
+    float valid;
+    float lambda;
+    float4 obj;
+    float3 border;      // distance to each polygon-border side of the fan triangle, in edge lengths (10: not a border)
+};
+
+vertex FaceOut face_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
+                       const device float2* tmpl [[buffer(0)]],
+                       const device Instance* inst [[buffer(1)]],
+                       constant Uniforms& u [[buffer(2)]]) {
     float2 bc = tmpl[vid];
     Instance f = inst[iid];
     float4 a = u.rot4 * f.a, b = u.rot4 * f.b, c = u.rot4 * f.c;
@@ -314,7 +326,7 @@ vertex VOut face_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     Projected q = project4(p, u);
     Projected qu = project4(p + h * (b - a), u);
     Projected qv = project4(p + h * (c - a), u);
-    VOut o;
+    FaceOut o;
     o.position = u.viewProj * float4(q.p, 1.0);
     o.world = q.p;
     o.normal = normalize(cross(qu.p - q.p, qv.p - q.p));
@@ -322,22 +334,70 @@ vertex VOut face_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.valid = q.valid;
     o.lambda = q.lambda;
     o.obj = f.a + bc.x * (f.b - f.a) + bc.y * (f.c - f.a);
-    o.coverage = 1.0;
+
+    // Barycentric weight × height = distance to the opposite side (in the flat 4D triangle).
+    float4 ab = f.b - f.a, ac = f.c - f.a;
+    float twiceArea = sqrt(max(dot(ab, ab) * dot(ac, ac) - dot(ab, ac) * dot(ab, ac), 1e-12));
+    float lbc = length(f.c - f.b), lab = length(ab), lac = length(ac);
+    float wa = 1.0 - bc.x - bc.y, wb = bc.x, wc = bc.y;
+    int flags = int(f.info.z + 0.5);
+    o.border = float3(wa * twiceArea / lbc,
+                      (flags & 1) ? wc * twiceArea / lab : 10.0 * lbc,
+                      (flags & 2) ? wb * twiceArea / lac : 10.0 * lbc) / lbc;
     return o;
 }
 
-fragment float4 face_fs(VOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
+struct OITOut {
+    float4 accum [[color(1)]];
+    float reveal [[color(2)]];
+};
+
+// Solid glass (perspective) morphing into soap-film bubbles (stereographic), weighted into the OIT targets.
+fragment OITOut face_fs(FaceOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
     if (in.valid < 0.999 || in.lambda > u.pole.z) discard_fragment();
     float glow = 0.5 * dissolve(in.obj, 0.35, u);
     float3 n = normalize(in.normal);
     float3 V = normalize(u.cameraPos.xyz - in.world);
-    float facing = abs(dot(n, V));
-    float fresnel = pow(1.0 - facing, u.style.y);
-    float alpha = u.fog.w * (0.35 + 0.65 * fresnel);
+    if (dot(n, V) < 0.0) n = -n;
+    float facing = saturate(dot(n, V));
+    float3 L = normalize(u.lightDir.xyz);
+    float3 H = normalize(L + V);
+    float3 env = environment(reflect(-V, n), u);
+    float schlick = pow(1.0 - facing, 5.0);
+    float t = smoothstep(0.0, 1.0, u.proj.y);
+    float body = 0.55 * saturate(dot(n, L)) + 0.35 * (0.5 + 0.5 * n.y) + 0.1;
+
+    // Glass: substantial body, Fresnel reflection, sharp highlight, bright seams along the polygon border.
+    float d = min(in.border.x, min(in.border.y, in.border.z));
+    float seam = 1.0 - smoothstep(0.0, 0.08, d);
+    float aGlass = u.glass.x + (1.0 - u.glass.x) * 0.6 * schlick + 0.02 * seam;
+    float3 lGlass = (0.04 + 0.96 * schlick) * 0.8 * env
+                  + pow(saturate(dot(n, H)), 120.0) * u.style.z * highlightGain(u)
+                  + mix(in.color, float3(1.0), 0.5) * seam * u.glass.z;
+
+    // Bubble: nearly clear face-on, the film thickening towards its silhouette; broad soft highlight.
+    float aBubble = u.glass.y + 0.55 * pow(1.0 - facing, 2.5);
+    float3 lBubble = (0.03 + 0.97 * schlick) * 0.6 * env
+                   + pow(saturate(dot(n, H)), 30.0) * 0.5 * u.style.z * highlightGain(u);
+
+    float alpha = saturate(mix(aGlass, aBubble, t));
+    float3 c = in.color * body + mix(lGlass, lBubble, t) / max(alpha, 1e-3);
     float dist = length(u.cameraPos.xyz - in.world);
     alpha *= smoothstep(u.fog.y, u.fog.z, dist) * poleVisibility(in.lambda, u);
-    float3 c = shade(in.color, n, in.world, u.style.z * 0.5, u);
     c = toneCeiling(applyFog(ember(c, glow, u), in.world, in.lambda, u), u);
     alpha = mix(alpha, 0.5, glow);
-    return float4(c * alpha, alpha);
+
+    // McGuire & Bavoil's depth weight (their eq. 10), with distances in our scene units.
+    float w = alpha * clamp(10.0 / (1e-5 + pow(dist / 5.0, 2.0) + pow(dist / 200.0, 6.0)), 1e-2, 3e3);
+    OITOut o;
+    o.accum = float4(c * alpha, alpha) * w;
+    o.reveal = alpha;
+    return o;
+}
+
+// Resolve: weighted average colour over the opaque frame, covering 1 − Π(1 − α).
+fragment float4 oit_composite_fs(BgOut in [[stage_in]], float4 accum [[color(1)]], float reveal [[color(2)]]) {
+    float a = 1.0 - reveal;
+    if (a < 1e-4) discard_fragment();
+    return float4(accum.rgb / max(accum.a, 1e-5) * a, a);
 }

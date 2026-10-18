@@ -28,6 +28,7 @@ public final class ConfigureSheet: NSObject {
     private let rotation = ConfigureSheet.speedSlider()
     private let info = NSButton(checkboxWithTitle: "Show info card", target: nil, action: nil)
     private let clock = NSButton(checkboxWithTitle: "Show clock", target: nil, action: nil)
+    private let fps = NSButton(checkboxWithTitle: "Show frame rate", target: nil, action: nil)
 
     /// Continuous slider over log2(speed), slow on the left; tick marks at both ends as in Apple's Flurry.
     private static func speedSlider() -> NSSlider {
@@ -93,6 +94,7 @@ public final class ConfigureSheet: NSObject {
         rotation.doubleValue = log2(settings.speed)
         info.state = settings.showInfo ? .on : .off
         clock.state = settings.showClock ? .on : .off
+        fps.state = settings.showFPS ? .on : .off
 
         var rows: [[NSView]] = [
             ("Polytope:", polytope), ("Projection:", projection), ("Fly-through:", fly),
@@ -104,7 +106,7 @@ public final class ConfigureSheet: NSObject {
             sliderLabels.append((label, slider))
             rows.append([label, Self.captioned(slider)])
         }
-        rows += [[NSGridCell.emptyContentView, info], [NSGridCell.emptyContentView, clock]]
+        rows += [info, clock, fps].map { [NSGridCell.emptyContentView, $0] }
 
         let grid = NSGridView(views: rows)
         grid.column(at: 0).xPlacement = .trailing
@@ -159,6 +161,7 @@ public final class ConfigureSheet: NSObject {
         settings.coloring = .init(rawValue: coloring.indexOfSelectedItem) ?? .signature
         settings.showInfo = info.state == .on
         settings.showClock = clock.state == .on
+        settings.showFPS = fps.state == .on
         onSave(settings)
         close()
     }

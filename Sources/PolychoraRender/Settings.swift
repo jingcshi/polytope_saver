@@ -59,6 +59,7 @@ public struct PolychoraSettings: Sendable {
     public var theme: String = Theme.ink.name
     public var showInfo = true
     public var showClock = true
+    public var showFPS = false
     /// Not loaded from defaults: compact is deprecated and only reachable from the preview app.
     public var overlayLayout: OverlayLayout = .quadrants
     public var flyThrough: FlyThrough = .all
@@ -75,7 +76,7 @@ public struct PolychoraSettings: Sendable {
 
     private enum Key {
         static let polytope = "polytope", projection = "projection", speed = "speed", theme = "theme"
-        static let showInfo = "showInfo", showClock = "showClock", layout = "overlayLayout"
+        static let showInfo = "showInfo", showClock = "showClock", showFPS = "showFPS", layout = "overlayLayout"
         static let fly = "flyThrough", animation = "animationSpeed", motion = "motionSpeed", coloring = "coloring"
     }
 
@@ -87,6 +88,7 @@ public struct PolychoraSettings: Sendable {
         if let v = d.string(forKey: Key.theme) { s.theme = v }
         if let v = d.object(forKey: Key.showInfo) as? Bool { s.showInfo = v }
         if let v = d.object(forKey: Key.showClock) as? Bool { s.showClock = v }
+        if let v = d.object(forKey: Key.showFPS) as? Bool { s.showFPS = v }
         if let v = d.object(forKey: Key.animation) as? Double { s.animationSpeed = v }
         if let v = d.object(forKey: Key.motion) as? Double { s.motionSpeed = v }
         if let v = d.object(forKey: Key.coloring) as? Int, let c = Coloring(rawValue: v) { s.coloring = c }
@@ -101,6 +103,7 @@ public struct PolychoraSettings: Sendable {
         d.set(theme, forKey: Key.theme)
         d.set(showInfo, forKey: Key.showInfo)
         d.set(showClock, forKey: Key.showClock)
+        d.set(showFPS, forKey: Key.showFPS)
         d.set(animationSpeed, forKey: Key.animation)
         d.set(motionSpeed, forKey: Key.motion)
         d.set(coloring.rawValue, forKey: Key.coloring)

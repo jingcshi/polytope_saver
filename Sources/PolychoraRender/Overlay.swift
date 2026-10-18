@@ -14,6 +14,7 @@ final class OverlayView: NSView {
     private let table = CATextLayer()
     // Both.
     private let clock = CATextLayer()
+    private let fpsLayer = CATextLayer()
 
     private var infoKey = ""
     private var clockKey = ""
@@ -28,6 +29,10 @@ final class OverlayView: NSView {
     var layout: PolychoraSettings.OverlayLayout = .quadrants { didSet { invalidate() } }
     var showInfo = true { didSet { invalidate() } }
     var showClock = true { didSet { clock.isHidden = !showClock } }
+    var showFPS = false { didSet { fpsLayer.isHidden = !showFPS; fpsKey = "" } }
+    /// Measured frame rate; shown under the phase indicator (top right) when `showFPS` is on.
+    var fps: Double = 0
+    private var fpsKey = ""
 
     private var infoLayers: [CATextLayer] { [info, title, projection, table] }
 
@@ -35,20 +40,22 @@ final class OverlayView: NSView {
         super.init(frame: frame)
         layer = CALayer()
         wantsLayer = true
-        for l in infoLayers + [clock] {
+        for l in infoLayers + [clock, fpsLayer] {
             l.isWrapped = false
             l.actions = ["contents": NSNull(), "opacity": NSNull(), "bounds": NSNull(), "position": NSNull()]
             layer!.addSublayer(l)
         }
         projection.alignmentMode = .right
         clock.alignmentMode = .right
+        fpsLayer.alignmentMode = .right
+        fpsLayer.isHidden = true
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    private func invalidate() { infoKey = ""; clockKey = "" }
+    private func invalidate() { infoKey = ""; clockKey = ""; fpsKey = "" }
 
     private var unit: CGFloat { max(min(bounds.width, bounds.height), 200) / 1000 }
     private var margin: CGFloat { 40 * unit }
@@ -118,6 +125,19 @@ final class OverlayView: NSView {
                 .kern: 2 * unit,
             ])
             place(clock, s, .bottomRight, dy: -6 * unit)
+        }
+
+        if showFPS {
+            let text = String(format: "%.2f fps", fps)
+            let fkey = "\(text)|\(bounds.size)|\(scale)|\(infoKey)"
+            if fkey != fpsKey {
+                fpsKey = fkey
+                fpsLayer.contentsScale = scale
+                let s = NSAttributedString(string: text, attributes: style(.topRight, 14, .regular, 0.5, kern: 0.6,
+                                                                           monospacedDigits: true))
+                // One row below the phase indicator (same height, since both are one 14-point line).
+                place(fpsLayer, s, .topRight, dy: -ceil(s.size().height) - 4 * unit)
+            }
         }
     }
 
@@ -217,6 +237,7 @@ extension Renderer {
         overlay.layout = settings.overlayLayout
         overlay.showInfo = settings.showInfo
         overlay.showClock = settings.showClock
+        overlay.showFPS = settings.showFPS
         overlay.update(frame)
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,

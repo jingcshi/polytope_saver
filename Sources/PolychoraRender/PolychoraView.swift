@@ -13,6 +13,8 @@ public final class PolychoraView: NSView, MTKViewDelegate {
     private let overlay: OverlayView
     private let isPreview: Bool
     private var lastTime: CFTimeInterval?
+    private var fpsWindowStart: CFTimeInterval = 0
+    private var fpsFrames = 0
     private var renderedFrames = 0
     private var missedFrames = 0
     private let log = Logger(subsystem: "com.jingcshi.Polychora", category: "view")
@@ -27,6 +29,7 @@ public final class PolychoraView: NSView, MTKViewDelegate {
             overlay.layout = newValue.overlayLayout
             overlay.showInfo = newValue.showInfo && !isPreview
             overlay.showClock = newValue.showClock && !isPreview
+            overlay.showFPS = newValue.showFPS && !isPreview
         }
     }
 
@@ -194,11 +197,18 @@ public final class PolychoraView: NSView, MTKViewDelegate {
                 missedFrames = 0
             }
             renderedFrames += 1
+            fpsFrames += 1
         } else {
             if missedFrames % 120 == 0 {
                 log.error("no drawable: bounds=\(NSStringFromRect(self.bounds), privacy: .public) drawable=\(Int(view.drawableSize.width))x\(Int(view.drawableSize.height))")
             }
             missedFrames += 1
+        }
+        // Presented frames over a half-second window: steady enough to read at two decimals.
+        if now - fpsWindowStart >= 0.5 {
+            if fpsWindowStart > 0 { overlay.fps = Double(fpsFrames) / (now - fpsWindowStart) }
+            fpsWindowStart = now
+            fpsFrames = 0
         }
         overlay.update(frame)
     }

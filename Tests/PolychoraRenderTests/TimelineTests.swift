@@ -22,11 +22,11 @@ import PolytopeKit
         s.projection = .perspective
         s.flyThrough = .large
         let show = Slideshow(settings: s, randomStart: false)
-        // fade-in 1.5 + rotate 30 + spin-down 3 → approach starts at 34.5 s; fly-through ends at 66.5 s.
-        show.seek(timeline: 34.6, rotation: 0)
+        // fade-in 1.5 + hold 36 + spin-down 2 → approach starts at 39.5 s; fly-through ends at 39.5 + 9 + 36 + 9 = 93.5 s.
+        show.seek(timeline: 39.6, rotation: 0)
         let r0 = show.rotationTime
         var maxApproach = 0.0, maxYaw = 0.0
-        for _ in 0..<(31 * 60) {
+        for _ in 0..<(538 * 6) {
             show.advance(by: 1.0 / 60)
             let f = show.frame()
             maxApproach = max(maxApproach, f.approach)
@@ -62,18 +62,18 @@ import PolytopeKit
             }
             return (start, end)
         }
-        // fade-in 1.5/a + hold 30/a, spin-down 3·√r; camera moves for 7/m + 18/a + 7/m.
+        // fade-in 1.5/a + hold 36/a, spin-down 2·√r; camera moves for 9/m + 36/a + 9/m.
         let base = approachWindow()
-        #expect(abs(base.start - 34.5) < 0.02)
-        #expect(abs((base.end - base.start) - 32) < 0.05)
+        #expect(abs(base.start - 39.5) < 0.02)
+        #expect(abs((base.end - base.start) - 54) < 0.05)
         let slowMotion = approachWindow(motion: 0.5)
-        #expect(abs(slowMotion.start - 34.5) < 0.02)
-        #expect(abs((slowMotion.end - slowMotion.start) - 46) < 0.05)
+        #expect(abs(slowMotion.start - 39.5) < 0.02)
+        #expect(abs((slowMotion.end - slowMotion.start) - 72) < 0.05)
         let fastAnimation = approachWindow(animation: 2)
-        #expect(abs(fastAnimation.start - 18.75) < 0.02)
-        #expect(abs((fastAnimation.end - fastAnimation.start) - 23) < 0.05)
+        #expect(abs(fastAnimation.start - 20.75) < 0.02)
+        #expect(abs((fastAnimation.end - fastAnimation.start) - 36) < 0.05)
         let fastRotation = approachWindow(rotation: 4)
-        #expect(abs(fastRotation.start - 37.5) < 0.02)
+        #expect(abs(fastRotation.start - 41.5) < 0.02)
     }
 
     @Test func noFlyThroughForSmallPolytopesInLargeMode() {

@@ -16,8 +16,24 @@ private var defaults: UserDefaults {
 final class SaverExtension: ScreenSaverExtension {
     override init() {
         log.notice("extension init pid=\(ProcessInfo.processInfo.processIdentifier)")
+        ScreenSaverStarts.observe()
         super.init()
     }
+}
+
+/// Time of the last `com.apple.screensaver.didstart`; observed from extension load onwards.
+enum ScreenSaverStarts {
+    private static var last: Date?
+    private static var observing = false
+
+    static func observe() {
+        guard !observing else { return }
+        observing = true
+        DistributedNotificationCenter.default().addObserver(
+            forName: .init("com.apple.screensaver.didstart"), object: nil, queue: .main) { _ in last = Date() }
+    }
+
+    static var recent: Bool { last.map { Date().timeIntervalSince($0) < 3 } ?? false }
 }
 
 final class SaverViewController: ScreenSaverViewController {
@@ -56,12 +72,52 @@ final class SaverConfigurationViewController: ScreenSaverConfigurationViewContro
 final class SaverView: ScreenSaverView {
     private var content: PolychoraView?
 
+    private var stopped = false
+
     override init?(frame: NSRect, isPreview: Bool) {
         super.init(frame: frame, isPreview: isPreview)
+        ScreenSaverStarts.observe()
         wantsLayer = true
+        log.notice("view init frame=\(NSStringFromRect(frame), privacy: .public)")
+    }
+
+    required init?(coder: NSCoder) { super.init(coder: coder) }
+
+    /// The framework never reports previews (only `loadView()` is called, with the main screen's frame,
+    /// and System Settings' thumbnail also gets a screen-sized WallpaperAgent window). A real session,
+    /// including the Preview button, is announced by `com.apple.screensaver.didstart` ~0.1–0.2 s before
+    /// the view attaches; the thumbnail is not. Content is created once the mode is known, because MSAA
+    /// is fixed at renderer creation.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        log.notice("""
+            moved to window: frame=\(NSStringFromRect(self.frame), privacy: .public) \
+            window=\(NSStringFromRect(self.window?.frame ?? .zero), privacy: .public) \
+            screen=\(self.window?.screen?.localizedName ?? "nil", privacy: .public)
+            """)
+        guard window != nil, content == nil, !stopped else { return }
+        if ScreenSaverStarts.recent {
+            install(preview: false, reason: "didstart")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.window != nil, self.content == nil, !self.stopped else { return }
+            // A process launched by the start itself may have missed the notification;
+            // the thumbnail is only ever shown with System Settings in front.
+            let settingsFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.systempreferences"
+            if ScreenSaverStarts.recent {
+                self.install(preview: false, reason: "didstart (late)")
+            } else {
+                self.install(preview: settingsFront, reason: settingsFront ? "no didstart, Settings in front" : "no didstart")
+            }
+        }
+    }
+
+    private func install(preview: Bool, reason: String) {
+        log.notice("mode: \(preview ? "preview" : "full", privacy: .public) (\(reason, privacy: .public))")
         let bundle = Bundle(for: Self.self)
         content = PolychoraView(
-            frame: bounds, settings: .load(from: defaults), isPreview: isPreview,
+            frame: bounds, settings: .load(from: defaults), isPreview: preview,
             precompiledLibrary: bundle.url(forResource: "Polychora", withExtension: "metallib"),
             shaderSource: {
                 guard let url = bundle.url(forResource: "Polychora", withExtension: "metal") else {
@@ -73,22 +129,11 @@ final class SaverView: ScreenSaverView {
             content.autoresizingMask = [.width, .height]
             addSubview(content)
         }
-        log.notice("view init frame=\(NSStringFromRect(frame), privacy: .public) preview=\(isPreview) content=\(self.content != nil)")
-    }
-
-    required init?(coder: NSCoder) { super.init(coder: coder) }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        log.notice("""
-            moved to window: frame=\(NSStringFromRect(self.frame), privacy: .public) \
-            window=\(NSStringFromRect(self.window?.frame ?? .zero), privacy: .public) \
-            screen=\(self.window?.screen?.localizedName ?? "nil", privacy: .public)
-            """)
     }
 
     override func stopAnimation() {
         log.notice("stopAnimation")
+        stopped = true
         content?.stop()
         super.stopAnimation()
     }

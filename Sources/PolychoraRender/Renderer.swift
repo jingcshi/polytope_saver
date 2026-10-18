@@ -24,6 +24,9 @@ struct Uniforms {
     var style: SIMD4<Float>
     var viewport: SIMD4<Float>
     var pole: SIMD4<Float>
+    var glow: SIMD4<Float>
+    var glowShape: SIMD4<Float>
+    var rimLight: SIMD4<Float>
 }
 
 /// Layout mirrors `Instance` in Polychora.metal.
@@ -201,11 +204,13 @@ public final class Renderer {
             fog: [t.fogDensity, 0.15, 0.9, t.faceAlpha],
             bgTop: c(t.backgroundTop), bgBottom: c(t.backgroundBottom),
             edgeColor: c(t.edge), vertexColor: c(t.vertex), faceColor: c(t.face),
-            lightDir: [-0.45, 0.75, 0.5, 0],
+            lightDir: SIMD4<Float>(t.lightDir, 0),
             palA: c(t.palette.a), palB: c(t.palette.b), palC: c(t.palette.c), palD: c(t.palette.d),
             style: [t.ringMix, t.fresnelPower, t.specular, 0],
             viewport: [Float(size.width), Float(size.height), 0, 0],
-            pole: [2.5, 3, 9, 0])
+            pole: [2.5, 3, 9, 0],
+            glow: t.glowUniforms.0, glowShape: t.glowUniforms.1,
+            rimLight: SIMD4<Float>(t.rim, 0))
     }
 
     public func encode(_ frame: FrameState, pass: MTLRenderPassDescriptor, size: CGSize,

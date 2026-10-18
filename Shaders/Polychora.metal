@@ -19,6 +19,9 @@ struct Uniforms {
     float4 style;       // ringMix, fresnelPower, specular, unused
     float4 viewport;    // width, height
     float4 pole;        // radius cap (in λ), pole-fog start λ, pole-fog end λ
+    float4 glow;        // rgb, mode (0 none, 1 horizon band, 2 backlight halo)
+    float4 glowShape;   // centre x, centre y (uv), width / radius (screen heights)
+    float4 rimLight;    // rgb (colour × strength)
 };
 
 struct Instance {
@@ -80,7 +83,7 @@ static float3 shade(float3 base, float3 n, float3 world, float specK, constant U
     float3 H = normalize(L + V);
     float spec = pow(max(dot(n, H), 0.0), 40.0) * specK;
     float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
-    return base * (0.62 * key + 0.30 * hemi + 0.12) + spec + 0.25 * rim * base;
+    return base * (0.62 * key + 0.30 * hemi + 0.12) + spec + 0.25 * rim * base + u.rimLight.xyz * rim;
 }
 
 // MARK: Background
@@ -95,10 +98,25 @@ vertex BgOut background_vs(uint vid [[vertex_id]]) {
     return o;
 }
 
+static float3 glowLight(float2 uv, constant Uniforms& u) {
+    float mode = u.glow.w;
+    if (mode < 0.5) return float3(0.0);
+    float aspect = u.viewport.x / max(u.viewport.y, 1.0);
+    if (mode < 1.5) {
+        float dy = (uv.y - u.glowShape.y) / u.glowShape.z;
+        float dx = uv.x - 0.5;
+        return u.glow.xyz * exp(-dy * dy) * (1.0 - 0.6 * dx * dx);
+    }
+    // Elliptical halo, a little taller than wide, as light spilling round an object on a plinth.
+    float2 d = float2((uv.x - u.glowShape.x) * aspect, (uv.y - u.glowShape.y) * 0.85) / u.glowShape.z;
+    return u.glow.xyz * exp(-dot(d, d));
+}
+
 static float3 backgroundColor(float2 uv, float4 frag, constant Uniforms& u) {
     float3 c = mix(u.bgBottom.xyz, u.bgTop.xyz, saturate(uv.y));
     float2 d = uv - 0.5;
     c *= 1.0 - 0.35 * dot(d, d);
+    c += glowLight(uv, u);
     // Dither against 8-bit banding.
     float n = fract(sin(dot(frag.xy, float2(12.9898, 78.233))) * 43758.5453);
     return c + (n - 0.5) / 255.0;

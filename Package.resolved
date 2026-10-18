@@ -1,0 +1,23 @@
+{
+  "originHash" : "f5a3dc4a71162761c5a6b79aa18804bf5413b094db13d753003fd884ad48870f",
+  "pins" : [
+    {
+      "identity" : "papersaver",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/AerialScreensaver/PaperSaver.git",
+      "state" : {
+        "revision" : "f38915ef1a4ac9e6c7a840802562d52a9f24fb8b"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser",
+      "state" : {
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
+      }
+    }
+  ],
+  "version" : 3
+}

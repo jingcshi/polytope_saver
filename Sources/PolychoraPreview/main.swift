@@ -8,6 +8,7 @@ import PolytopeKit
 //
 //   PolychoraPreview
 //   PolychoraPreview --snapshot out.png [--kind 120] [--stereo 1] [--time 12] [--theme Ink] [--size 1600x1000] [--overlay quadrants|compact]
+//                    [--approach 0…1] [--yaw degrees]
 
 let shaderURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -35,6 +36,8 @@ if let out = argument("--snapshot") {
     let show = Slideshow(settings: settings, randomStart: false)
     show.seek(timeline: 10, rotation: time)
     show.overrideStereo(Double(argument("--stereo") ?? "0") ?? 0)
+    show.overrideCamera(approach: Double(argument("--approach") ?? "0") ?? 0,
+                        yaw: (Double(argument("--yaw") ?? "0") ?? 0) * .pi / 180)
 
     var snapshot = renderer.snapshot(show.frame(), width: dims[0], height: dims[1])
     if let layout = argument("--overlay"), let shot = snapshot {
@@ -97,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         change(&s)
         view.settings = s
         s.save(to: .standard)
-        print("polytope=\(s.polytope.map { "\($0)" } ?? "all") projection=\(s.projection.label) theme=\(s.theme) speed=\(s.speed) layout=\(s.overlayLayout.label)")
+        print("polytope=\(s.polytope.map { "\($0)" } ?? "all") projection=\(s.projection.label) theme=\(s.theme) speed=\(s.speed) layout=\(s.overlayLayout.label) fly=\(s.flyThrough.label)")
     }
 
     private func handle(_ e: NSEvent) -> Bool {
@@ -118,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 s.theme = names[((names.firstIndex(of: s.theme) ?? 0) + 1) % names.count]
             }
         case "i": update { $0.showInfo.toggle() }
+        case "v": update { $0.flyThrough = .init(rawValue: ($0.flyThrough.rawValue + 1) % 3)! }
         case "l": update { $0.overlayLayout = .init(rawValue: ($0.overlayLayout.rawValue + 1) % 2)! }
         case "c": update { $0.showClock.toggle() }
         case "=", "+": update { $0.speed = min($0.speed * 1.25, 8) }
@@ -134,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func printHelp() {
         print("""
         keys: ←/→ prev/next · 1-6 pick polytope · 0 cycle all · p projection mode · t theme
-              i info · l info layout · c clock · +/- speed · space pause · r reload shaders · f fullscreen · h help
+              i info · l info layout · v fly-through · c clock · +/- speed · space pause · r reload shaders · f fullscreen · h help
         shader: \(shaderURL.path) (auto-reloads on save)
         """)
     }

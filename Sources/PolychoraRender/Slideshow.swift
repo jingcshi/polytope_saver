@@ -10,6 +10,10 @@ public struct FrameState {
     public var stereo: Double
     /// Global visibility for transitions, 0…1.
     public var fade: Double
+    /// Camera position from the viewing distance (0) to the projection centre (1).
+    public var approach: Double = 0
+    /// Panorama yaw at the projection centre, radians.
+    public var yaw: Double = 0
 
     public var projectionLabel: String {
         switch stereo {
@@ -20,12 +24,19 @@ public struct FrameState {
     }
 }
 
-/// Timeline: per polytope, [hold] [morph] [hold] [cross-fade], then the next polytope.
+/// Per polytope: [fade in] [rotate] [fly-through?] [morph] [rotate] [fly-through?] [fade out].
+/// With a fixed projection the morph is replaced by a second rotate and the last fly-through is dropped.
+/// A fly-through stops the rotation, moves the camera to the projection centre, pans 360°, and
+/// withdraws along the same path; rotation spins back up in the following phase.
 public final class Slideshow {
     public var settings: PolychoraSettings { didSet { rebuildOrder() } }
 
-    public let morphSeconds = 8.0
-    public let fadeSeconds = 3.0
+    /// Durations at pace 1 (holdSeconds = 30); all scale with `settings.pace`.
+    private enum Base {
+        static let morph = 8.0, fade = 3.0
+        static let spinUp = 3.0, spinDown = 3.0
+        static let approach = 7.0, panorama = 18.0, withdraw = 7.0
+    }
     /// Seconds for the natural rotation to advance by one symmetry period at speed 1.
     public let periodSeconds = 10.0
 
@@ -34,6 +45,7 @@ public final class Slideshow {
     private var order: [PolytopeKind] = []
     private var offset = 0
     private var stereoOverride: Double?
+    private var cameraOverride: (approach: Double, yaw: Double)?
 
     public init(settings: PolychoraSettings, randomStart: Bool = true) {
         self.settings = settings
@@ -46,14 +58,107 @@ public final class Slideshow {
         offset %= max(order.count, 1)
     }
 
-    private var segmentLength: Double {
-        let h = settings.holdSeconds
-        return settings.projection == .alternate ? 2 * h + morphSeconds + fadeSeconds : 2 * h + fadeSeconds
+    // MARK: Phases
+
+    private enum Kind { case fadeIn, rotate, morph, fly, fadeOut }
+    private struct Phase { let kind: Kind; let duration: Double; let stereo: Double }
+
+    private var flySeconds: Double { (Base.spinDown + Base.approach + Base.panorama + Base.withdraw) * settings.pace }
+
+    private func phases(_ kind: PolytopeKind) -> [Phase] {
+        let p = settings.pace, h = settings.holdSeconds
+        let fly = settings.flyThrough.applies(to: kind)
+        let halfFade = Base.fade * p / 2
+        let first: Double = settings.projection == .stereographic ? 1 : 0
+        var out = [Phase(kind: .fadeIn, duration: halfFade, stereo: first)]
+        func view(_ s: Double, flyAfter: Bool) {
+            out.append(Phase(kind: .rotate, duration: h, stereo: s))
+            if fly && flyAfter { out.append(Phase(kind: .fly, duration: flySeconds, stereo: s)) }
+        }
+        switch settings.projection {
+        case .alternate:
+            view(0, flyAfter: true)
+            out.append(Phase(kind: .morph, duration: Base.morph * p, stereo: 0))
+            view(1, flyAfter: true)
+        case .perspective, .stereographic:
+            let s: Double = settings.projection == .stereographic ? 1 : 0
+            view(s, flyAfter: true)
+            view(s, flyAfter: false)
+        }
+        out.append(Phase(kind: .fadeOut, duration: halfFade, stereo: out.last!.stereo))
+        return out
+    }
+
+    private func segmentLength(_ kind: PolytopeKind) -> Double { phases(kind).reduce(0) { $0 + $1.duration } }
+
+    private struct Sample {
+        var spin = 1.0, stereo = 0.0, fade = 1.0, approach = 0.0, yaw = 0.0
+    }
+
+    /// State at time `tau` into a polytope's segment.
+    private func sample(_ kind: PolytopeKind, _ tau: Double) -> Sample {
+        let p = settings.pace
+        let list = phases(kind)
+        var s = Sample()
+        var start = 0.0
+        var spinStart = 0.0
+        for (i, ph) in list.enumerated() {
+            let end = start + ph.duration
+            if tau < end || i == list.count - 1 {
+                let local = tau - start
+                s.stereo = ph.stereo
+                s.spin = rampUp((tau - spinStart) / (Base.spinUp * p))
+                switch ph.kind {
+                case .fadeIn:
+                    s.fade = smoothstep(0, ph.duration, local)
+                case .rotate:
+                    break
+                case .morph:
+                    s.stereo = smoothstep(0, ph.duration, local)
+                case .fadeOut:
+                    s.fade = 1 - smoothstep(0, ph.duration, local)
+                    if i > 0, list[i - 1].kind == .fly { s.spin = 0 }
+                case .fly:
+                    let d = Base.spinDown * p, a = Base.approach * p, pano = Base.panorama * p, w = Base.withdraw * p
+                    s.spin = rampDown(local / d)
+                    if local < d {
+                        break
+                    } else if local < d + a {
+                        s.approach = travel((local - d) / a)
+                    } else if local < d + a + pano {
+                        s.approach = 1
+                        s.yaw = 2 * .pi * travel((local - d - a) / pano)
+                    } else {
+                        s.approach = 1 - travel((local - d - a - pano) / w)
+                    }
+                }
+                return s
+            }
+            if ph.kind == .fly { spinStart = end }
+            start = end
+        }
+        return s
+    }
+
+    // MARK: Timeline
+
+    private var cycle: [PolytopeKind] { order.indices.map { order[($0 + offset) % order.count] } }
+
+    /// Segment index into `cycle` and the segment's start on the timeline.
+    private func locate(_ t: Double) -> (index: Int, start: Double) {
+        let lens = cycle.map(segmentLength)
+        let total = lens.reduce(0, +)
+        var start = (t / total).rounded(.down) * total
+        var i = 0
+        while i < lens.count - 1, start + lens[i] <= t { start += lens[i]; i += 1 }
+        return (i, start)
     }
 
     public func advance(by dt: Double) {
+        let (i, start) = locate(timelineTime)
+        let spin = sample(cycle[i], timelineTime - start).spin
         timelineTime += dt
-        rotationTime += dt * settings.speed
+        rotationTime += dt * settings.speed * spin
     }
 
     public func seek(timeline: Double, rotation: Double) {
@@ -61,32 +166,24 @@ public final class Slideshow {
         rotationTime = rotation
     }
 
-    /// Jump to the start of the next (+1) or previous (−1) polytope.
+    /// Jump to the next (+1) or previous (−1) polytope, fully faded in.
     public func skip(_ delta: Int) {
-        let current = (timelineTime / segmentLength).rounded(.down)
-        timelineTime = (current + Double(delta)) * segmentLength + fadeSeconds / 2
+        let c = cycle
+        let (i, start) = locate(timelineTime)
+        let target = delta > 0 ? start + segmentLength(c[i])
+                               : start - segmentLength(c[(i - 1 + c.count) % c.count])
+        timelineTime = target + Base.fade * settings.pace / 2
     }
 
-    /// Manually pin the projection (preview app); nil returns to the timeline.
+    /// Manual overrides for the preview app and snapshots; nil returns to the timeline.
     public func overrideStereo(_ s: Double?) { stereoOverride = s }
+    public func overrideCamera(approach: Double, yaw: Double) { cameraOverride = (approach, yaw) }
 
     public func frame() -> FrameState {
-        let len = segmentLength
-        let index = Int((timelineTime / len).rounded(.down))
-        let kind = order[((index + offset) % order.count + order.count) % order.count]
-        let tau = timelineTime - Double(index) * len
-
-        let half = fadeSeconds / 2
-        let fade = smoothstep(0, half, tau) * (1 - smoothstep(len - half, len, tau))
-
-        let stereo: Double
-        switch settings.projection {
-        case .perspective: stereo = 0
-        case .stereographic: stereo = 1
-        case .alternate:
-            let h = settings.holdSeconds
-            stereo = smoothstep(half + h, half + h + morphSeconds, tau)
-        }
+        let c = cycle
+        let (i, start) = locate(timelineTime)
+        let kind = c[i]
+        let s = sample(kind, timelineTime - start)
 
         let (natural, period) = kind.naturalRotation
         let angle = rotationTime * period / periodSeconds
@@ -95,11 +192,28 @@ public final class Slideshow {
             * Rotation4.plane(0, 2, 0.017 * t) * Rotation4.plane(1, 3, 0.011 * t)
         let base = Rotation4.plane(0, 3, 0.6) * Rotation4.plane(1, 2, 0.4)
         return FrameState(kind: kind, rotation: drift * base * natural.matrix(angle),
-                          stereo: stereoOverride ?? stereo, fade: fade)
+                          stereo: stereoOverride ?? s.stereo, fade: s.fade,
+                          approach: cameraOverride?.approach ?? s.approach,
+                          yaw: cameraOverride?.yaw ?? s.yaw)
     }
 }
 
 func smoothstep(_ a: Double, _ b: Double, _ x: Double) -> Double {
     let t = min(max((x - a) / (b - a), 0), 1)
     return t * t * (3 - 2 * t)
+}
+
+/// Cosine ease 0 → 1 over x ∈ [0, 1]; used for angular-velocity ramps.
+func rampUp(_ x: Double) -> Double { x <= 0 ? 0 : x >= 1 ? 1 : (1 - cos(.pi * x)) / 2 }
+func rampDown(_ x: Double) -> Double { 1 - rampUp(x) }
+
+/// Position along a move whose velocity eases up to a constant, cruises, and eases down to rest.
+/// `ramp` is the fraction of the duration spent accelerating (and again decelerating).
+func travel(_ u: Double, ramp a: Double = 0.25) -> Double {
+    let x = min(max(u, 0), 1)
+    let vmax = 1 / (1 - a)
+    func easeIn(_ x: Double) -> Double { vmax * (x / 2 - a / (2 * .pi) * sin(.pi * x / a)) }
+    if x < a { return easeIn(x) }
+    if x > 1 - a { return 1 - easeIn(1 - x) }
+    return vmax * (a / 2 + x - a)
 }

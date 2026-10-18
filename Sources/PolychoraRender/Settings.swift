@@ -23,6 +23,26 @@ public struct PolychoraSettings: Sendable {
         public var label: String { self == .compact ? "Compact" : "Quadrants" }
     }
 
+    public enum FlyThrough: Int, CaseIterable, Sendable {
+        case off, large, all
+
+        public var label: String {
+            switch self {
+            case .off: return "Off"
+            case .large: return "120- and 600-cell"
+            case .all: return "All polytopes"
+            }
+        }
+
+        public func applies(to kind: PolytopeKind) -> Bool {
+            switch self {
+            case .off: return false
+            case .large: return kind == .cell120 || kind == .cell600
+            case .all: return true
+            }
+        }
+    }
+
     /// nil cycles through all six.
     public var polytope: PolytopeKind?
     public var projection: Projection = .alternate
@@ -31,14 +51,18 @@ public struct PolychoraSettings: Sendable {
     public var showInfo = true
     public var showClock = true
     public var overlayLayout: OverlayLayout = .compact
-    /// Seconds spent in each projection before morphing / moving on.
+    public var flyThrough: FlyThrough = .all
+    /// Seconds of free rotation per view. Also the global pace dial: every phase and
+    /// fly-through step scales by `holdSeconds / 30`.
     public var holdSeconds: Double = 30
+    public var pace: Double { holdSeconds / 30 }
 
     public init() {}
 
     private enum Key {
         static let polytope = "polytope", projection = "projection", speed = "speed", theme = "theme"
         static let showInfo = "showInfo", showClock = "showClock", hold = "holdSeconds", layout = "overlayLayout"
+        static let fly = "flyThrough"
     }
 
     public static func load(from d: UserDefaults) -> PolychoraSettings {
@@ -51,6 +75,7 @@ public struct PolychoraSettings: Sendable {
         if let v = d.object(forKey: Key.showClock) as? Bool { s.showClock = v }
         if let v = d.object(forKey: Key.hold) as? Double { s.holdSeconds = v }
         if let v = d.object(forKey: Key.layout) as? Int, let l = OverlayLayout(rawValue: v) { s.overlayLayout = l }
+        if let v = d.object(forKey: Key.fly) as? Int, let f = FlyThrough(rawValue: v) { s.flyThrough = f }
         return s
     }
 
@@ -63,6 +88,7 @@ public struct PolychoraSettings: Sendable {
         d.set(showClock, forKey: Key.showClock)
         d.set(holdSeconds, forKey: Key.hold)
         d.set(overlayLayout.rawValue, forKey: Key.layout)
+        d.set(flyThrough.rawValue, forKey: Key.fly)
         d.synchronize()
     }
 }

@@ -183,10 +183,12 @@ public final class Renderer {
         let s = Float(frame.stereo)
         let d = 2.2 - 1.2 * s
         let camDistance = 4.6 + 0.6 * s
-        let eye = SIMD3<Float>(0, 0, camDistance)
+        let eye = SIMD3<Float>(0, 0, camDistance * Float(1 - frame.approach))
+        let yaw = Float(frame.yaw)
+        let forward = SIMD3<Float>(-sin(yaw), 0, -cos(yaw))
         let aspect = Float(size.width / max(size.height, 1))
-        let viewProj = perspective(fovY: 38 * .pi / 180, aspect: aspect, near: 0.03, far: 100)
-            * lookAt(eye: eye, target: .zero, up: [0, 1, 0])
+        let viewProj = perspective(fovY: 38 * .pi / 180, aspect: aspect, near: 0.01, far: 100)
+            * lookAt(eye: eye, target: eye + forward, up: [0, 1, 0])
         let t = theme
         func c(_ v: SIMD3<Float>) -> SIMD4<Float> { SIMD4<Float>(v, 1) }
         return Uniforms(
@@ -245,12 +247,16 @@ public final class Renderer {
         enc.endEncoding()
     }
 
-    public func draw(_ frame: FrameState, in view: MTKView) {
+    /// Returns false if no drawable was available.
+    @discardableResult
+    public func draw(_ frame: FrameState, in view: MTKView) -> Bool {
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
-              let cb = queue.makeCommandBuffer() else { return }
-        encode(frame, pass: pass, size: view.drawableSize, commandBuffer: cb)
+              let cb = queue.makeCommandBuffer() else { return false }
+        let target = drawable.texture
+        encode(frame, pass: pass, size: CGSize(width: target.width, height: target.height), commandBuffer: cb)
         cb.present(drawable)
         cb.commit()
+        return true
     }
 
     /// Render one frame offscreen and return it as an sRGB image.

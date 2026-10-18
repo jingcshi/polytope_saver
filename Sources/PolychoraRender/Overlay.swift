@@ -92,7 +92,7 @@ final class OverlayView: NSView {
             case .quadrants:
                 place(title, titleText(frame), .topLeft)
                 place(projection, NSAttributedString(string: frame.projectionLabel,
-                                                     attributes: style(13, .regular, 0.4, kern: 0.6)), .topRight)
+                                                     attributes: style(14, .regular, 0.5, kern: 0.6)), .topRight)
                 place(table, tableText(frame), .bottomLeft)
             }
         }
@@ -103,22 +103,16 @@ final class OverlayView: NSView {
         if ckey != clockKey {
             clockKey = ckey
             clock.contentsScale = scale
-            let (size, weight): (CGFloat, NSFont.Weight) = layout == .quadrants ? (58, .light) : (54, .ultraLight)
             let s = NSAttributedString(string: now, attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: size * unit, weight: weight),
-                .foregroundColor: textColor.withAlphaComponent(0.75),
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 72 * unit, weight: .light),
+                .foregroundColor: textColor.withAlphaComponent(0.8),
                 .kern: 2 * unit,
             ])
             place(clock, s, .bottomRight, dy: -6 * unit)
         }
     }
 
-    private func n(_ x: Int) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.groupingSeparator = "\u{2009}"
-        return f.string(from: NSNumber(value: x)) ?? "\(x)"
-    }
+    private func n(_ x: Int) -> String { String(x) }
 
     private func counts(_ kind: PolytopeKind) -> (v: Int, e: Int, f: Int, c: Int) {
         let p = polytope(kind)
@@ -128,8 +122,8 @@ final class OverlayView: NSView {
     private func titleText(_ frame: FrameState) -> NSMutableAttributedString {
         let i = frame.kind.info
         let s = NSMutableAttributedString()
-        s.append(NSAttributedString(string: i.name + "\n", attributes: style(34, .light, 0.9, kern: 0.5)))
-        s.append(NSAttributedString(string: "\(i.altName)   \(i.schlafli)", attributes: style(15, .regular, 0.6, kern: 1)))
+        s.append(NSAttributedString(string: i.name + "\n", attributes: style(40, .light, 0.9, kern: 0.5)))
+        s.append(NSAttributedString(string: "\(i.altName)   \(i.schlafli)", attributes: style(18, .regular, 0.7, kern: 1)))
         return s
     }
 
@@ -137,13 +131,13 @@ final class OverlayView: NSView {
         let i = frame.kind.info
         let p = counts(frame.kind)
         let s = titleText(frame)
-        s.append(NSAttributedString(string: "\n", attributes: style(15, .regular, 0.6, kern: 1)))
+        s.append(NSAttributedString(string: "\n", attributes: style(14, .regular, 0, kern: 1)))
         s.append(NSAttributedString(string: "\n", attributes: style(6, .regular, 0)))
-        let body = style(13, .regular, 0.55, kern: 0.6)
+        let body = style(14, .regular, 0.8, kern: 0.6)
         s.append(NSAttributedString(string: "\(n(p.v)) vertices · \(n(p.e)) edges · \(n(p.f)) faces · \(n(p.c)) cells\n", attributes: body))
         s.append(NSAttributedString(string: "cells: \(i.cellType) · vertex figure: \(i.vertexFigure)\n", attributes: body))
         s.append(NSAttributedString(string: "symmetry \(i.symmetry), order \(n(i.symmetryOrder)) · dual: \(i.dual)\n", attributes: body))
-        s.append(NSAttributedString(string: frame.projectionLabel, attributes: style(13, .regular, 0.4, kern: 0.6)))
+        s.append(NSAttributedString(string: frame.projectionLabel, attributes: style(14, .regular, 0.5, kern: 0.6)))
         return s
     }
 
@@ -158,10 +152,10 @@ final class OverlayView: NSView {
             ("faces", n(p.f), "polygons", i.faceType),
             ("cells", n(p.c), "polyhedra", i.cellType),
             ("symmetry", i.symmetry, "order", n(i.symmetryOrder)),
-            ("coxeter group", i.coxeter, "dual", i.dual),
+            ("3D analogue", i.analogue, "dual", i.dual),
         ]
-        let label = style(13, .regular, 0.4, kern: 0.6)
-        let value = style(13, .regular, 0.7, kern: 0.6, monospacedDigits: true)
+        let label = style(14, .regular, 0.5, kern: 0.6)
+        let value = style(14, .regular, 0.8, kern: 0.6, monospacedDigits: true)
         func width(_ s: String, _ a: [NSAttributedString.Key: Any]) -> CGFloat { NSAttributedString(string: s, attributes: a).size().width }
         let w0 = rows.map { width($0.0, label) }.max()!
         let w1 = rows.map { width($0.1, value) }.max()!
@@ -172,8 +166,8 @@ final class OverlayView: NSView {
         para.tabStops = [NSTextTab(textAlignment: .right, location: c1),
                          NSTextTab(textAlignment: .left, location: c2),
                          NSTextTab(textAlignment: .left, location: c3)]
-        let labelP = style(13, .regular, 0.4, kern: 0.6, para: para)
-        let valueP = style(13, .regular, 0.7, kern: 0.6, monospacedDigits: true, para: para)
+        let labelP = style(14, .regular, 0.5, kern: 0.6, para: para)
+        let valueP = style(14, .regular, 0.8, kern: 0.6, monospacedDigits: true, para: para)
 
         let s = NSMutableAttributedString()
         for (k, r) in rows.enumerated() {

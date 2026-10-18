@@ -6,13 +6,20 @@
 - Elements: edge tubes, vertex spheres, translucent faces; no cell rendering.
 - Motion: Hopf-aligned isoclinic rotation (Petrie double rotation for the 5-cell) + slow drift.
 - Extras: info card, clock, slideshow of all six, options sheet.
-- Packaging: legacy `.saver`.
+- Fly-through: stop rotation → camera to projection centre → 360° pan → withdraw; off / 120+600 / all; one pace dial.
+- Packaging: ExtensionKit `.appex` (private API) inside a stub `/Applications/Polychora.app`. Legacy `.saver` kept as `make install-legacy`; its host clipped the canvas to the wrong display's size on the secondary monitor (~30% of sessions), which nothing inside the bundle could fix.
 
 ## Now
 
-- [ ] Verify the installed saver on macOS 27: fullscreen run, System Settings thumbnail/preview, options sheet, multiple monitors, no instance pile-up after several activations.
+- [ ] **Priority:** separate pace controls for the rotation view and the fly-through (one more options dial; today `holdSeconds` scales both).
+- [ ] Verify the options sheet closes via `configureSheetDidEnd` and the host app's activation (PaperSaver). Logs: `/usr/bin/log show --last 1h --info --predicate 'subsystem == "com.jingcshi.Polychora"'` (categories `appex`, `host`).
+- [ ] Appex preview detection: `loadView()` gets the main screen's frame, so `isPreview` may be false in the System Settings thumbnail (full MSAA, 120 fps, overlay on). Check which `loadView` variant the framework calls.
 - [ ] Aesthetics pass in the preview app: pick / refine themes (Ink, Porcelain, Brass are placeholders), tube and vertex sizes per polytope, face opacity, ring colouring on/off.
+- [ ] Fly-through tuning: step durations (spin-down 3, approach 7, panorama 18, withdraw 7 s at pace 1), near-camera tube occlusion at the centre, sparse view inside small polytopes (8-cell).
 - [ ] Stereographic framing: choose the base orientation so a Hopf ring passes through the pole (tunnel fly-through) vs. ring-torus side view.
+## Done
+
+- [x] Appex verified on macOS 27 with built-in + DELL: no display dysfunction over 20 hot-corner triggers and 20 settings previews (legacy host's wrong-canvas and post-rapid-trigger blackouts are gone).
 
 ## Later
 
@@ -21,3 +28,5 @@
 - [ ] EDR / wide gamut output for highlights.
 - [ ] Info card drift for burn-in safety on external OLEDs.
 - [ ] Optional cell rendering (shrunken cells, Hopf-ring colouring) as a mode.
+- [ ] Additional themes: various flavors of glassy and metallic [reference media 1](https://en.wikipedia.org/wiki/120-cell#/media/File:120-cell_perspective-cell-first-02.png), [reference media 2](https://en.wikipedia.org/wiki/120-cell#/media/File:120-cell.gif)
+- [ ] The 10 regular 4D star polychora, if rendering is feasible

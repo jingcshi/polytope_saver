@@ -1,10 +1,17 @@
 import AppKit
-import PolychoraRender
 import PolytopeKit
 
 /// Options sheet shown from System Settings → Screen Saver → Options.
-final class ConfigureSheet: NSObject {
-    let window: NSWindow
+/// The legacy saver presents `window`; the appex embeds `view` in its configuration controller.
+public final class ConfigureSheet: NSObject {
+    public let view: NSView
+    public lazy var window: NSWindow = {
+        let w = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        w.contentView = view
+        return w
+    }()
+    /// Called on OK/Cancel instead of ending the sheet on its parent window.
+    public var onDismiss: (() -> Void)?
     private let onSave: (PolychoraSettings) -> Void
     private var settings: PolychoraSettings
 
@@ -12,16 +19,17 @@ final class ConfigureSheet: NSObject {
     private let projection = NSPopUpButton()
     private let theme = NSPopUpButton()
     private let layout = NSPopUpButton()
+    private let fly = NSPopUpButton()
     private let speed = NSSlider(value: 1, minValue: 0.25, maxValue: 3, target: nil, action: nil)
     private let hold = NSSlider(value: 30, minValue: 10, maxValue: 120, target: nil, action: nil)
     private let info = NSButton(checkboxWithTitle: "Show info card", target: nil, action: nil)
     private let clock = NSButton(checkboxWithTitle: "Show clock", target: nil, action: nil)
 
-    init(settings: PolychoraSettings, onSave: @escaping (PolychoraSettings) -> Void) {
+    public init(settings: PolychoraSettings, onSave: @escaping (PolychoraSettings) -> Void) {
         self.settings = settings
         self.onSave = onSave
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 330),
-                          styleMask: [.titled], backing: .buffered, defer: false)
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 420, height: 360))
+        view = stack
         super.init()
 
         polytope.addItem(withTitle: "Cycle all six")
@@ -33,6 +41,8 @@ final class ConfigureSheet: NSObject {
         theme.selectItem(withTitle: settings.theme)
         PolychoraSettings.OverlayLayout.allCases.forEach { layout.addItem(withTitle: $0.label) }
         layout.selectItem(at: settings.overlayLayout.rawValue)
+        PolychoraSettings.FlyThrough.allCases.forEach { fly.addItem(withTitle: $0.label) }
+        fly.selectItem(at: settings.flyThrough.rawValue)
         speed.doubleValue = settings.speed
         hold.doubleValue = settings.holdSeconds
         info.state = settings.showInfo ? .on : .off
@@ -42,7 +52,7 @@ final class ConfigureSheet: NSObject {
             [NSTextField(labelWithString: label), control]
         }
         let grid = NSGridView(views: [
-            row("Polytope:", polytope), row("Projection:", projection), row("Theme:", theme), row("Info layout:", layout),
+            row("Polytope:", polytope), row("Projection:", projection), row("Fly-through:", fly), row("Theme:", theme), row("Info layout:", layout),
             row("Rotation speed:", speed), row("Seconds per view:", hold),
             [NSGridCell.emptyContentView, info], [NSGridCell.emptyContentView, clock],
         ])
@@ -54,16 +64,21 @@ final class ConfigureSheet: NSObject {
         let ok = NSButton(title: "OK", target: self, action: #selector(okPressed))
         ok.keyEquivalent = "\r"
         let buttons = NSStackView(views: [cancel, ok])
-        let stack = NSStackView(views: [grid, buttons])
+        stack.setViews([grid, buttons], in: .leading)
         stack.orientation = .vertical
         stack.alignment = .trailing
         stack.spacing = 20
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        window.contentView = stack
     }
 
     private func close() {
-        if let parent = window.sheetParent { parent.endSheet(window) } else { window.close() }
+        if let onDismiss {
+            onDismiss()
+        } else if let w = view.window, let parent = w.sheetParent {
+            parent.endSheet(w)
+        } else {
+            view.window?.close()
+        }
     }
 
     @objc private func cancelPressed() { close() }
@@ -75,6 +90,7 @@ final class ConfigureSheet: NSObject {
         settings.theme = theme.titleOfSelectedItem ?? Theme.ink.name
         settings.speed = speed.doubleValue
         settings.holdSeconds = hold.doubleValue.rounded()
+        settings.flyThrough = .init(rawValue: fly.indexOfSelectedItem) ?? .all
         settings.overlayLayout = .init(rawValue: layout.indexOfSelectedItem) ?? .compact
         settings.showInfo = info.state == .on
         settings.showClock = clock.state == .on

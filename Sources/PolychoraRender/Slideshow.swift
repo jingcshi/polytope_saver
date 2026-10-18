@@ -33,9 +33,9 @@ public final class Slideshow {
 
     /// Durations with every speed at 1.
     private enum Base {
-        static let hold = 30.0, morph = 8.0, fade = 3.0
-        static let spin = 3.0
-        static let approach = 7.0, panorama = 18.0, withdraw = 7.0
+        static let hold = 36.0, morph = 5.0, fade = 3.0
+        static let spin = 2.0
+        static let approach = 9.0, panorama = 36.0, withdraw = 9.0
     }
 
     private struct Durations {

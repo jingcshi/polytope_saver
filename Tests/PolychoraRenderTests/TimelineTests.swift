@@ -41,13 +41,16 @@ import PolytopeKit
         #expect(show.rotationTime > r0)
     }
 
-    /// Doubling the fly-through length stretches only the camera move; the view before it is unchanged.
-    @Test func flyPaceIsIndependentOfViewPace() {
-        func approachWindow(fly: Double) -> (start: Double, end: Double) {
+    /// Motion speed stretches only approach/withdraw, animation speed the hold and pan,
+    /// rotation speed the spin-down (∝ √speed).
+    @Test func speedDialsScaleTheirOwnPhases() {
+        func approachWindow(animation: Double = 1, motion: Double = 1, rotation: Double = 1) -> (start: Double, end: Double) {
             var s = PolychoraSettings()
             s.polytope = .cell600
             s.projection = .perspective
-            s.flySeconds = fly
+            s.animationSpeed = animation
+            s.motionSpeed = motion
+            s.speed = rotation
             let show = Slideshow(settings: s, randomStart: false)
             var start = Double.nan, end = Double.nan
             for k in 0..<20000 {
@@ -59,12 +62,18 @@ import PolytopeKit
             }
             return (start, end)
         }
-        let base = approachWindow(fly: 35), long = approachWindow(fly: 70)
-        // fade-in 1.5 + rotate 30, then spin-down 3·f; the camera moves for 32·f.
+        // fade-in 1.5/a + hold 30/a, spin-down 3·√r; camera moves for 7/m + 18/a + 7/m.
+        let base = approachWindow()
         #expect(abs(base.start - 34.5) < 0.02)
-        #expect(abs(long.start - 37.5) < 0.02)
         #expect(abs((base.end - base.start) - 32) < 0.05)
-        #expect(abs((long.end - long.start) - 64) < 0.05)
+        let slowMotion = approachWindow(motion: 0.5)
+        #expect(abs(slowMotion.start - 34.5) < 0.02)
+        #expect(abs((slowMotion.end - slowMotion.start) - 46) < 0.05)
+        let fastAnimation = approachWindow(animation: 2)
+        #expect(abs(fastAnimation.start - 18.75) < 0.02)
+        #expect(abs((fastAnimation.end - fastAnimation.start) - 23) < 0.05)
+        let fastRotation = approachWindow(rotation: 4)
+        #expect(abs(fastRotation.start - 37.5) < 0.02)
     }
 
     @Test func noFlyThroughForSmallPolytopesInLargeMode() {

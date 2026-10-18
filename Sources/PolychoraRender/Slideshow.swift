@@ -31,12 +31,25 @@ public struct FrameState {
 public final class Slideshow {
     public var settings: PolychoraSettings { didSet { rebuildOrder() } }
 
-    /// Durations at pace 1. View phases scale with `settings.pace` (holdSeconds / 30),
-    /// fly-through steps with `settings.flyPace` (flySeconds / 35).
+    /// Durations with every speed at 1.
     private enum Base {
-        static let morph = 8.0, fade = 3.0
-        static let spinUp = 3.0, spinDown = 3.0
+        static let hold = 30.0, morph = 8.0, fade = 3.0
+        static let spin = 3.0
         static let approach = 7.0, panorama = 18.0, withdraw = 7.0
+    }
+
+    private struct Durations {
+        let hold, fade, morph, spin, approach, panorama, withdraw: Double
+        var fly: Double { spin + approach + panorama + withdraw }
+    }
+
+    /// Animation speed scales the still-camera phases (hold, pan, fades, morph); motion speed the
+    /// camera travel. Spin-up/down use angular acceleration ∝ √ω, so they last ∝ ω/√ω = √(rotation speed).
+    private var durations: Durations {
+        let a = 1 / settings.animationSpeed, m = 1 / settings.motionSpeed
+        return Durations(hold: Base.hold * a, fade: Base.fade * a, morph: Base.morph * a,
+                         spin: Base.spin * max(settings.speed, 0.01).squareRoot(),
+                         approach: Base.approach * m, panorama: Base.panorama * a, withdraw: Base.withdraw * m)
     }
     /// Seconds for the natural rotation to advance by one symmetry period at speed 1.
     public let periodSeconds = 10.0
@@ -64,22 +77,20 @@ public final class Slideshow {
     private enum Kind { case fadeIn, rotate, morph, fly, fadeOut }
     private struct Phase { let kind: Kind; let duration: Double; let stereo: Double }
 
-    private var flySeconds: Double { (Base.spinDown + Base.approach + Base.panorama + Base.withdraw) * settings.flyPace }
-
     private func phases(_ kind: PolytopeKind) -> [Phase] {
-        let p = settings.pace, h = settings.holdSeconds
+        let d = durations, h = d.hold
         let fly = settings.flyThrough.applies(to: kind)
-        let halfFade = Base.fade * p / 2
+        let halfFade = d.fade / 2
         let first: Double = settings.projection == .stereographic ? 1 : 0
         var out = [Phase(kind: .fadeIn, duration: halfFade, stereo: first)]
         func view(_ s: Double, flyAfter: Bool) {
             out.append(Phase(kind: .rotate, duration: h, stereo: s))
-            if fly && flyAfter { out.append(Phase(kind: .fly, duration: flySeconds, stereo: s)) }
+            if fly && flyAfter { out.append(Phase(kind: .fly, duration: d.fly, stereo: s)) }
         }
         switch settings.projection {
         case .alternate:
             view(0, flyAfter: true)
-            out.append(Phase(kind: .morph, duration: Base.morph * p, stereo: 0))
+            out.append(Phase(kind: .morph, duration: d.morph, stereo: 0))
             view(1, flyAfter: true)
         case .perspective, .stereographic:
             let s: Double = settings.projection == .stereographic ? 1 : 0
@@ -98,7 +109,7 @@ public final class Slideshow {
 
     /// State at time `tau` into a polytope's segment.
     private func sample(_ kind: PolytopeKind, _ tau: Double) -> Sample {
-        let p = settings.pace
+        let dur = durations
         let list = phases(kind)
         var s = Sample()
         var start = 0.0
@@ -108,7 +119,7 @@ public final class Slideshow {
             if tau < end || i == list.count - 1 {
                 let local = tau - start
                 s.stereo = ph.stereo
-                s.spin = rampUp((tau - spinStart) / (Base.spinUp * p))
+                s.spin = rampUp((tau - spinStart) / dur.spin)
                 switch ph.kind {
                 case .fadeIn:
                     s.fade = smoothstep(0, ph.duration, local)
@@ -120,8 +131,7 @@ public final class Slideshow {
                     s.fade = 1 - smoothstep(0, ph.duration, local)
                     if i > 0, list[i - 1].kind == .fly { s.spin = 0 }
                 case .fly:
-                    let f = settings.flyPace
-                    let d = Base.spinDown * f, a = Base.approach * f, pano = Base.panorama * f, w = Base.withdraw * f
+                    let d = dur.spin, a = dur.approach, pano = dur.panorama, w = dur.withdraw
                     s.spin = rampDown(local / d)
                     if local < d {
                         break
@@ -174,7 +184,7 @@ public final class Slideshow {
         let (i, start) = locate(timelineTime)
         let target = delta > 0 ? start + segmentLength(c[i])
                                : start - segmentLength(c[(i - 1 + c.count) % c.count])
-        timelineTime = target + Base.fade * settings.pace / 2
+        timelineTime = target + durations.fade / 2
     }
 
     /// Manual overrides for the preview app and snapshots; nil returns to the timeline.

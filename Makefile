@@ -11,7 +11,10 @@ LEGACY_DIR := $(HOME)/Library/Screen Savers
 APP_DIR := /Applications
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
-.PHONY: all app saver shaders test preview thumbnail install uninstall install-legacy uninstall-legacy clean
+VERSION := $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Host/Info.plist)
+RELEASE := build/Polychora-$(VERSION).zip
+
+.PHONY: all app saver shaders test preview thumbnail install uninstall install-legacy uninstall-legacy release clean
 
 all: app
 
@@ -90,6 +93,14 @@ install-legacy: saver uninstall
 uninstall-legacy:
 	rm -rf "$(LEGACY_DIR)/Polychora.saver"
 	-killall legacyScreenSaver 2>/dev/null
+
+# Distributable zip of Polychora.app (Apple Silicon, ad-hoc signed). ditto keeps the signatures intact.
+release: test app
+	codesign --verify --deep --strict $(APP)
+	@lipo -archs $(APPEX)/Contents/MacOS/PolychoraAppex
+	rm -f $(RELEASE)
+	ditto -c -k --keepParent $(APP) $(RELEASE)
+	shasum -a 256 $(RELEASE)
 
 clean:
 	rm -rf build .build

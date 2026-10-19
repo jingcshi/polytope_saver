@@ -5,7 +5,11 @@ Swift + Metal, ExtensionKit `.appex` screensaver (legacy `.saver` as fallback), 
 
 ![120-cell, stereographic](Resources/thumbnail@2x.png)
 
-## Build and install
+## Install
+
+Prebuilt for Apple Silicon: download the zip from the latest GitHub release and follow [INSTALL.md](INSTALL.md).
+
+## Build from source
 
 ```sh
 make test        # geometry tests (V/E/F/C counts, Euler, symmetry of the rotation)
@@ -13,6 +17,7 @@ make preview     # windowed dev harness, shader hot-reload
 make install     # build Polychora.app (+ .appex) → /Applications, register with pluginkit (needs admin)
 make install-legacy  # fallback: Polychora.saver → ~/Library/Screen Savers
 make uninstall
+make release     # tests, then build/Polychora-<version>.zip (arm64, ad-hoc signed) and its SHA-256
 ```
 
 Then pick **Polychora** in System Settings → Wallpaper → Screen Saver → Other. *Options…* opens the configure sheet.

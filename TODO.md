@@ -11,7 +11,8 @@
 
 ## Now
 
-- [ ] Wide gamut (Display P3 primaries) for more saturated palettes. EDR currently uses extended-linear sRGB, so the colours are unchanged.
+- [ ] v1.0.0 release, after the loose ends (round glow): Apple Silicon only (memoryless OIT targets need an Apple GPU); ad-hoc signed, so the installation guide covers Gatekeeper's "Open Anyway"; binary plus installation guide.
+- [ ] (v1.1) Wide gamut (Display P3 primaries) for more saturated palettes. `oklch()` clamps to linear sRGB, so EDR output is still sRGB-gamut: map OKLCH into P3 instead and retune chroma (greens and cyans gain most).
 - [ ] Polytope materials and textures (next round). Reference: the "Dimensions" film (Jos Leys, Étienne Ghys, Aurélien Alvarez), whose fly-in and pan our camera independently reproduces.
     - [x] Glass / acrylic texture, see `references/`. Agreed plan, in order:
       1. [x] Cast-steel framework (tubes and joints at 60% of the old radius): joint spheres at tube radius (seamless union), dark metal with sharp specular and a fake environment reflection from the theme gradient and glow. Neutral steel per theme (Brass stays brass); the signature hue moves to glass and cells.

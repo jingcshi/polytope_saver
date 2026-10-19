@@ -4,8 +4,8 @@ import Testing
 @Suite struct SettingsTests {
     @Test func targetFPSStepsAreRefreshDivisors() {
         let steps = PolychoraSettings.targetFPSSteps
-        #expect(steps == [24, 25, 30, 33, 36, 40, 45, 48, 50, 55, 60, 72, 75, 90, 100, 120, 144, 165, 180])
-        #expect(steps.contains(60))
+        #expect(steps == [30, 33, 36, 40, 45, 48, 50, 55, 60, 72, 75, 90, 100, 120, 144, 165, 180])
+        #expect(steps[steps.count / 2] == 60)
     }
 
     @Test func effectiveFPSFallsToNextLowerDivisor() {

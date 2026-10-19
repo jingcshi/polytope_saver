@@ -80,17 +80,19 @@ public final class Renderer {
     private var models: [PolytopeKind: Model] = [:]
 
     private struct Pipelines {
-        let background, fade, edge, vertex, face, cell, composite: MTLRenderPipelineState
+        let background, fade, edge, vertex, face, cellBack, cell, composite: MTLRenderPipelineState
     }
 
     /// Weighted blended order-independent transparency (McGuire & Bavoil 2013) for faces and cells.
     /// The accumulation targets are memoryless: they live in tile memory for the duration of the pass.
     static let accumFormat = MTLPixelFormat.rgba16Float
     static let revealFormat = MTLPixelFormat.r16Float
+    /// The four nearest cell back-face distances per pixel, for exact cell thickness (memoryless too).
+    static let backsFormat = MTLPixelFormat.rgba32Float
 
-    /// Single-sample targets of the transparent pass: OIT accumulators and the frame's depth,
-    /// resolved from the multisampled pass so the tubes still hide the glass behind them.
-    private struct TransparentTargets { let accum, reveal, depth: MTLTexture }
+    /// Single-sample targets of the transparent pass: OIT accumulators, cell back faces, and the
+    /// frame's depth, resolved from the multisampled pass so the tubes still hide the glass behind them.
+    private struct TransparentTargets { let accum, reveal, backs, depth: MTLTexture }
     private var transparentTargets: TransparentTargets?
 
     private func transparentTargets(width: Int, height: Int) -> TransparentTargets {
@@ -102,7 +104,7 @@ public final class Renderer {
             return device.makeTexture(descriptor: d)!
         }
         let t = TransparentTargets(accum: make(Self.accumFormat, .memoryless), reveal: make(Self.revealFormat, .memoryless),
-                                   depth: make(Self.depthFormat, .private))
+                                   backs: make(Self.backsFormat, .memoryless), depth: make(Self.depthFormat, .private))
         transparentTargets = t
         return t
     }
@@ -129,6 +131,8 @@ public final class Renderer {
         let cellGrid: Mesh
         /// Unrotated 4D centroid of each cell (not normalised).
         let cellCentroids: MTLBuffer
+        /// One vertex per cell, which fixes each cell's projected size.
+        let cellAnchors: MTLBuffer
         /// Unrotated 4D centroid of each face (not normalised), indexed by the face triangles' info.y.
         let faceCentroids: MTLBuffer
         let edgeRadius: Float
@@ -192,9 +196,11 @@ public final class Renderer {
         }
 
         // Opaque pipelines run in the multisampled pass (colour only). Transparent ones run in the
-        // single-sample pass, which always carries the two OIT attachments; only faces / cells write them.
+        // single-sample pass, which always carries the two OIT attachments (only faces / cells write them)
+        // and the cell back-face distances (only `cellBack` writes them).
         func pipeline(_ vs: String, _ fs: String, blend: Bool, alphaToCoverage: Bool = false,
-                      transparent: Bool = false, accumulate: Bool = false) throws -> MTLRenderPipelineState {
+                      transparent: Bool = false, accumulate: Bool = false,
+                      backs: Bool = false) throws -> MTLRenderPipelineState {
             let d = MTLRenderPipelineDescriptor()
             d.vertexFunction = library.makeFunction(name: vs)
             d.fragmentFunction = library.makeFunction(name: fs)
@@ -204,6 +210,11 @@ public final class Renderer {
             if transparent {
                 d.colorAttachments[1].pixelFormat = Self.accumFormat
                 d.colorAttachments[2].pixelFormat = Self.revealFormat
+                d.colorAttachments[3].pixelFormat = Self.backsFormat
+                if !backs { d.colorAttachments[3].writeMask = [] }
+            }
+            if backs {
+                for i in 0...2 { d.colorAttachments[i].writeMask = [] }
             }
             d.depthAttachmentPixelFormat = Self.depthFormat
             if blend {
@@ -224,7 +235,7 @@ public final class Renderer {
                 r.isBlendingEnabled = true
                 r.sourceRGBBlendFactor = .zero; r.sourceAlphaBlendFactor = .zero
                 r.destinationRGBBlendFactor = .oneMinusSourceColor; r.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            } else if transparent {
+            } else if transparent && !backs {
                 d.colorAttachments[1].writeMask = []
                 d.colorAttachments[2].writeMask = []
             }
@@ -236,6 +247,7 @@ public final class Renderer {
             edge: try pipeline("edge_vs", "opaque_fs", blend: false, alphaToCoverage: true),
             vertex: try pipeline("vertex_vs", "opaque_fs", blend: false, alphaToCoverage: true),
             face: try pipeline("face_vs", "face_fs", blend: false, transparent: true, accumulate: true),
+            cellBack: try pipeline("cell_vs", "cell_back_fs", blend: false, transparent: true, backs: true),
             cell: try pipeline("cell_vs", "cell_fs", blend: false, transparent: true, accumulate: true),
             composite: try pipeline("background_vs", "oit_composite_fs", blend: true, transparent: true))
     }
@@ -295,6 +307,7 @@ public final class Renderer {
                       // Budget of the earlier 70% cells, measured at a steady 120 fps on the 600-cell.
                       cellGrid: grid(level: gridLevel(p.edgeLength * 0.7)),
                       cellCentroids: buffer(centroids.map { SIMD4<Float>($0) }),
+                      cellAnchors: buffer(p.cells.map { SIMD4<Float>(p.vertices[$0[0]]) }),
                       faceCentroids: buffer(p.faces.map { f in
                           SIMD4<Float>(f.reduce(Vec4.zero) { $0 + p.vertices[$1] } / Double(f.count))
                       }),
@@ -405,7 +418,8 @@ public final class Renderer {
         second.colorAttachments[0].loadAction = .load
         second.colorAttachments[0].storeAction = .store
         for (i, tex, clear) in [(1, t.accum, MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)),
-                                (2, t.reveal, MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1))] {
+                                (2, t.reveal, MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)),
+                                (3, t.backs, MTLClearColor(red: 1e9, green: 1e9, blue: 1e9, alpha: 1e9))] {    // kNoBack
             let a = second.colorAttachments[i]!
             a.texture = tex
             a.loadAction = .clear
@@ -429,8 +443,8 @@ public final class Renderer {
             enc.setVertexBuffer(m.faceCentroids, offset: 0, index: 3)
             draw(enc, m.grid, m.faces, count: m.faceCount)
         case .cells:
-            enc.setRenderPipelineState(p.cell)
             enc.setVertexBuffer(m.cellCentroids, offset: 0, index: 3)
+            enc.setVertexBuffer(m.cellAnchors, offset: 0, index: 4)
             enc.setVertexBuffer(m.cellGrid.vertices, offset: 0, index: 0)
             enc.setVertexBuffer(m.cellTris, offset: 0, index: 1)
             // Only the highlighted ring is drawn, plus the next one during the hand-over (as in cell_vs).
@@ -438,11 +452,16 @@ public final class Renderer {
             let phase = frame.highlight.truncatingRemainder(dividingBy: Double(n))
             let current = Int(phase)
             let handover = smoothstep(Slideshow.highlightHandoverStart, 1.0, phase - Double(current))
-            for g in handover > 0 ? [current, (current + 1) % n] : [current] {
-                let r = m.groupRanges[g]
-                enc.drawIndexedPrimitives(type: .triangle, indexCount: m.cellGrid.indexCount, indexType: .uint32,
-                                          indexBuffer: m.cellGrid.indices, indexBufferOffset: 0,
-                                          instanceCount: r.count, baseVertex: 0, baseInstance: r.lowerBound)
+            let groups = handover > 0 ? [current, (current + 1) % n] : [current]
+            // Back faces first: the front faces read their distances.
+            for pipeline in [p.cellBack, p.cell] {
+                enc.setRenderPipelineState(pipeline)
+                for g in groups {
+                    let r = m.groupRanges[g]
+                    enc.drawIndexedPrimitives(type: .triangle, indexCount: m.cellGrid.indexCount, indexType: .uint32,
+                                              indexBuffer: m.cellGrid.indices, indexBufferOffset: 0,
+                                              instanceCount: r.count, baseVertex: 0, baseInstance: r.lowerBound)
+                }
             }
         }
 

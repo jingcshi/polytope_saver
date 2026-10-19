@@ -113,7 +113,7 @@ public struct PolychoraSettings: Sendable {
     /// Values offered for `targetFPS`: every whole divisor of a mainstream refresh rate within 24…180 Hz,
     /// since display links only run at divisors of the refresh rate (see `effectiveFPS`).
     public static let targetFPSSteps: [Int] = Array(Set(refreshRates.flatMap { r in
-        (1...r / 24).filter { r % $0 == 0 }.map { r / $0 }.filter { $0 >= 24 }
+        (1...r / 24).filter { r % $0 == 0 }.map { r / $0 }.filter { $0 >= 30 }
     })).sorted()
 
     /// The rate a display link actually runs at for `target` on a `refresh` Hz display: the largest

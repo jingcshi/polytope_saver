@@ -430,7 +430,7 @@ struct CellOut {
     float lambda;
     float4 obj;
     float3 centre [[flat]];     // projected cell centroid
-    float radius [[flat]];      // projected circumradius: the cell's proxy sphere for thickness
+    float radius [[flat]];      // centroid to the cell's anchor vertex, projected: one size per cell
     float presence [[flat]];    // fades cells whose centroid nears the pole (they would engulf the view)
 };
 
@@ -438,10 +438,12 @@ vertex CellOut cell_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
                        const device float2* tmpl [[buffer(0)]],
                        const device Instance* inst [[buffer(1)]],
                        constant Uniforms& u [[buffer(2)]],
-                       const device float4* centroids [[buffer(3)]]) {
+                       const device float4* centroids [[buffer(3)]],
+                       const device float4* anchors [[buffer(4)]]) {
     Instance f = inst[iid];
     int cell = int(f.info.y + 0.5);
     float4 c0 = centroids[cell];
+    float4 anchor = c0 + kCellScale * (anchors[cell] - c0);
     float4 oa = c0 + kCellScale * (f.a - c0), ob = c0 + kCellScale * (f.b - c0), oc = c0 + kCellScale * (f.c - c0);
 
     float2 bc = tmpl[vid];
@@ -469,27 +471,68 @@ vertex CellOut cell_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.lambda = q.lambda;
     o.obj = oa + bc.x * (ob - oa) + bc.y * (oc - oa);
     o.centre = pc.p;
-    o.radius = length(project4(a, u).p - pc.p);
+    o.radius = length(project4(u.rot4 * anchor, u).p - pc.p);
     o.presence = 1.0 - smoothstep(2.5, 5.0, pc.lambda);
     return o;
 }
 
-// Front surfaces only; each cell is one translucent volume whose opacity follows Beer–Lambert over
-// its thickness along the view ray. Thickness comes from the chord through the proxy sphere
-// (exact for a ball, a close upper bound for a convex cell), so no back-face depth pass is needed.
-fragment OITOut cell_fs(CellOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
-    if (in.valid < 0.999 || in.lambda > u.pole.z || in.presence * in.opacity < 1e-3) discard_fragment();
-    float3 n = normalize(in.normal);
+// Each cell is one translucent volume whose opacity follows Beer–Lambert over its thickness along
+// the view ray. The ring's back faces are drawn first and keep, per pixel, the four nearest back-face
+// distances in tile memory (sorted); a front face's exit is the nearest of them beyond it.
+constant float kNoBack = 1e9;
+
+struct CellBacks { float4 d [[color(3)]]; };
+
+static float cellFacing(CellOut in, constant Uniforms& u, thread float3& n, thread float3& V) {
+    n = normalize(in.normal);
     if (dot(n, in.world - in.centre) < 0.0) n = -n;    // outward
-    float3 V = normalize(u.cameraPos.xyz - in.world);
-    float facing = dot(n, V);
+    V = normalize(u.cameraPos.xyz - in.world);
+    return dot(n, V);
+}
+
+fragment CellBacks cell_back_fs(CellOut in [[stage_in]], constant Uniforms& u [[buffer(0)]],
+                                float4 backs [[color(3)]]) {
+    if (in.valid < 0.999 || in.lambda > u.pole.z || in.presence * in.opacity < 1e-3) discard_fragment();
+    float3 n, V;
+    if (cellFacing(in, u, n, V) > 0.0) discard_fragment();
+    float x = length(u.cameraPos.xyz - in.world);
+    for (int i = 0; i < 4; i++) {    // insert into the sorted four, dropping the farthest
+        float lo = min(backs[i], x);
+        x = max(backs[i], x);
+        backs[i] = lo;
+    }
+    CellBacks o;
+    o.d = backs;
+    return o;
+}
+
+fragment OITOut cell_fs(CellOut in [[stage_in]], constant Uniforms& u [[buffer(0)]],
+                        float4 backs [[color(3)]]) {
+    if (in.valid < 0.999 || in.lambda > u.pole.z || in.presence * in.opacity < 1e-3) discard_fragment();
+    float3 n, V;
+    float facing = cellFacing(in, u, n, V);
     if (facing <= 0.0) discard_fragment();
     float glow = 0.5 * dissolve(in.obj, 0.35, u);
 
-    float3 oc = in.centre - u.cameraPos.xyz;
-    float along = dot(oc, -V);
-    float b2 = max(dot(oc, oc) - along * along, 0.0);
-    float tau = sqrt(saturate(1.0 - b2 / max(in.radius * in.radius, 1e-8)));    // chord / diameter
+    // Thickness as a fraction of the cell's diameter. A neighbour's back face on the shared face
+    // sits exactly at this front face, hence the margin.
+    float dist = length(u.cameraPos.xyz - in.world);
+    float diameter = max(2.0 * in.radius, 1e-6);
+    float exit = kNoBack;
+    for (int i = 3; i >= 0; i--) {
+        if (backs[i] > dist + 1e-3 * diameter) exit = backs[i];
+    }
+    float tau = (exit - dist) / diameter;
+    if (exit >= kNoBack) {
+        // Back face hidden by a tube, or beyond the four kept: chord through a sphere about the cell.
+        float3 oc = in.centre - u.cameraPos.xyz;
+        float along = dot(oc, -V);
+        float b2 = max(dot(oc, oc) - along * along, 0.0);
+        tau = sqrt(saturate(1.0 - b2 / max(in.radius * in.radius, 1e-8))) / 1.7;
+    }
+    // Real cells are thinner than their circumsphere (a cube face-on: 1/√3 of its diameter); the
+    // material constants below were tuned on the sphere's chord, so restore its density.
+    tau = saturate(1.7 * tau);
 
     float3 L = normalize(u.lightDir.xyz);
     float3 H = normalize(L + V);
@@ -498,8 +541,9 @@ fragment OITOut cell_fs(CellOut in [[stage_in]], constant Uniforms& u [[buffer(0
     float t = smoothstep(0.0, 1.0, u.proj.y);
     float hemi = 0.5 + 0.5 * n.y;
 
-    // Acrylic: clear tinted solid, depth of colour from thickness, crisp reflections.
-    float aAcrylic = 1.0 - exp(-1.4 * tau);
+    // Acrylic: clear tinted solid, depth of colour from thickness, crisp reflections. The floor keeps
+    // cells that perspective flattens into thin plates visible.
+    float aAcrylic = 0.15 + 0.85 * (1.0 - exp(-1.4 * tau));
     float3 cAcrylic = in.color * (0.55 * saturate(dot(n, L)) + 0.35 * hemi + 0.1);
     float3 lAcrylic = (0.04 + 0.96 * schlick) * 0.8 * env
                     + pow(saturate(dot(n, H)), 150.0) * u.style.z * highlightGain(u);
@@ -513,7 +557,6 @@ fragment OITOut cell_fs(CellOut in [[stage_in]], constant Uniforms& u [[buffer(0
 
     float alpha = saturate(mix(aAcrylic, aJelly, t));
     float3 c = mix(cAcrylic, cJelly, t) + mix(lAcrylic, lJelly, t) / max(alpha, 1e-3);
-    float dist = length(u.cameraPos.xyz - in.world);
     alpha *= in.opacity * smoothstep(u.fog.y, u.fog.z, dist) * poleVisibility(in.lambda, u) * in.presence;
     c = toneCeiling(applyFog(ember(c, glow, u), in.world, in.lambda, u), u);
     alpha = mix(alpha, 0.5, glow);

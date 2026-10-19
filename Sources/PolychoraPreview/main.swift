@@ -23,6 +23,46 @@ func argument(_ name: String) -> String? {
     return a[i + 1]
 }
 
+// GPU time per frame by mode, at a drawable size (default: the built-in display) with 4× MSAA.
+//   PolychoraPreview --bench [--size 3456x2234] [--frames 240] [--samples 4]
+if CommandLine.arguments.contains("--bench") {
+    let dims = (argument("--size") ?? "3456x2234").split(separator: "x").compactMap { Int($0) }
+    let frames = Int(argument("--frames") ?? "240") ?? 240
+    let samples = Int(argument("--samples") ?? "4") ?? 4
+    let renderer = try Renderer(device: MTLCreateSystemDefaultDevice()!, sampleCount: samples, shaderSource: loadShader)
+    print("kind  proj    surfaces  median ms  p90 ms")
+    for kind in [PolytopeKind.cell120, .cell600] {
+        for stereo in [0.0, 1.0] {
+            for surfaces in PolychoraSettings.Surfaces.allCases {
+                var settings = PolychoraSettings()
+                settings.polytope = kind
+                renderer.surfaces = surfaces
+                let show = Slideshow(settings: settings, randomStart: false)
+                show.seek(timeline: 10, rotation: 0)
+                show.overrideStereo(stereo)
+                let t = renderer.gpuTimes(show, width: dims[0], height: dims[1], frames: frames).dropFirst(10).sorted()
+                let row = String(format: "%-5@ %-7@ %-9@ %9.2f %7.2f", "\(kind.info.name.prefix(5))" as NSString,
+                                 (stereo > 0 ? "stereo" : "persp") as NSString, surfaces.label as NSString,
+                                 t[t.count / 2], t[t.count * 9 / 10])
+                print(row)
+            }
+        }
+    }
+    exit(0)
+}
+
+// The options sheet, rendered to a PNG for layout checks.
+//   PolychoraPreview --sheet out.png
+if let out = argument("--sheet") {
+    let sheet = ConfigureSheet(settings: PolychoraSettings()) { _ in }
+    let v = sheet.window.contentView!
+    v.layoutSubtreeIfNeeded()
+    let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds)!
+    v.cacheDisplay(in: v.bounds, to: rep)
+    try rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))
+    exit(0)
+}
+
 if let out = argument("--snapshot") {
     var settings = PolychoraSettings()
     settings.polytope = kindNames[argument("--kind") ?? "120"] ?? .cell120

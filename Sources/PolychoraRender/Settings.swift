@@ -103,8 +103,13 @@ public struct PolychoraSettings: Sendable {
     /// Camera travel (fly-through approach and withdraw): durations scale by 1 / motionSpeed.
     public var motionSpeed: Double = 1
 
+    /// Frame rate requested from the display link; the display's refresh rate caps it.
+    public var targetFPS = 60
+
     /// Range of the speed multipliers; the options sheet maps them onto log2-scaled sliders.
     public static let speedRange: ClosedRange<Double> = 0.25...4
+    /// Values offered for `targetFPS`.
+    public static let targetFPSSteps = [30, 60, 90, 120]
 
     public init() {}
 
@@ -112,7 +117,7 @@ public struct PolychoraSettings: Sendable {
         static let polytope = "polytope", projection = "projection", speed = "speed", theme = "theme"
         static let showInfo = "showInfo", showClock = "showClock", showFPS = "showFPS", layout = "overlayLayout"
         static let fly = "flyThrough", animation = "animationSpeed", motion = "motionSpeed", coloring = "coloring"
-        static let surfaces = "surfaces", pan = "panSpeed", frameColors = "frameColors"
+        static let surfaces = "surfaces", pan = "panSpeed", frameColors = "frameColors", targetFPS = "targetFPS"
     }
 
     public static func load(from d: UserDefaults) -> PolychoraSettings {
@@ -129,6 +134,7 @@ public struct PolychoraSettings: Sendable {
         if let v = d.object(forKey: Key.fly) as? Int, let f = FlyThrough(rawValue: v) { s.flyThrough = f }
         if let v = d.object(forKey: Key.surfaces) as? Int, let f = Surfaces(rawValue: v) { s.surfaces = f }
         if let v = d.object(forKey: Key.frameColors) as? Int, let f = FrameColors(rawValue: v) { s.frameColors = f }
+        if let v = d.object(forKey: Key.targetFPS) as? Int, targetFPSSteps.contains(v) { s.targetFPS = v }
         return s
     }
 
@@ -148,6 +154,7 @@ public struct PolychoraSettings: Sendable {
         d.set(flyThrough.rawValue, forKey: Key.fly)
         d.set(surfaces.rawValue, forKey: Key.surfaces)
         d.set(frameColors.rawValue, forKey: Key.frameColors)
+        d.set(targetFPS, forKey: Key.targetFPS)
         d.synchronize()
     }
 }

@@ -32,6 +32,7 @@ public final class PolychoraView: NSView, MTKViewDelegate {
             overlay.showInfo = newValue.showInfo && !isPreview
             overlay.showClock = newValue.showClock && !isPreview
             overlay.showFPS = newValue.showFPS && !isPreview
+            mtkView.preferredFramesPerSecond = isPreview ? min(30, newValue.targetFPS) : newValue.targetFPS
         }
     }
 
@@ -59,7 +60,6 @@ public final class PolychoraView: NSView, MTKViewDelegate {
         }
         mtkView.depthStencilPixelFormat = Renderer.depthFormat
         mtkView.sampleCount = samples
-        mtkView.preferredFramesPerSecond = isPreview ? 30 : 120
         mtkView.isPaused = false
         mtkView.autoResizeDrawable = false
         mtkView.enableSetNeedsDisplay = false

@@ -72,7 +72,11 @@ public final class Slideshow {
     /// Seconds for the natural rotation to advance by one symmetry period at speed 1.
     public let periodSeconds = 15.0
     /// Seconds each Hopf ring (or 5-cell cell) stays highlighted.
-    public let highlightSeconds = 6.0
+    public static let highlightSeconds = 6.0
+    /// The last seconds of each slot, during which the next ring fades in as this one fades out.
+    public static let highlightHandoverSeconds = 2.0
+    /// Fraction of a slot at which the hand-over starts.
+    static var highlightHandoverStart: Double { 1 - highlightHandoverSeconds / highlightSeconds }
 
     private(set) public var timelineTime: Double = 0
     private(set) public var rotationTime: Double = 0
@@ -247,7 +251,7 @@ public final class Slideshow {
                           approach: cameraOverride?.approach ?? s.approach,
                           yaw: cameraOverride?.yaw ?? s.yaw,
                           stage: stereoOverride == nil ? s.stage : .view,
-                          highlight: highlightTime / highlightSeconds)
+                          highlight: highlightTime / Self.highlightSeconds)
     }
 }
 

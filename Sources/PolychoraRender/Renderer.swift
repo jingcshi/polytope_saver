@@ -83,24 +83,27 @@ public final class Renderer {
         let background, fade, edge, vertex, face, cell, composite: MTLRenderPipelineState
     }
 
-    /// Weighted blended order-independent transparency (McGuire & Bavoil 2013) for the faces.
-    /// Both targets are memoryless: they live in tile memory for the duration of the pass only.
+    /// Weighted blended order-independent transparency (McGuire & Bavoil 2013) for faces and cells.
+    /// The accumulation targets are memoryless: they live in tile memory for the duration of the pass.
     static let accumFormat = MTLPixelFormat.rgba16Float
     static let revealFormat = MTLPixelFormat.r16Float
-    private var oitTargets: (accum: MTLTexture, reveal: MTLTexture)?
 
-    private func oit(width: Int, height: Int) -> (accum: MTLTexture, reveal: MTLTexture) {
-        if let t = oitTargets, t.accum.width == width, t.accum.height == height { return t }
-        func make(_ format: MTLPixelFormat) -> MTLTexture {
+    /// Single-sample targets of the transparent pass: OIT accumulators and the frame's depth,
+    /// resolved from the multisampled pass so the tubes still hide the glass behind them.
+    private struct TransparentTargets { let accum, reveal, depth: MTLTexture }
+    private var transparentTargets: TransparentTargets?
+
+    private func transparentTargets(width: Int, height: Int) -> TransparentTargets {
+        if let t = transparentTargets, t.depth.width == width, t.depth.height == height { return t }
+        func make(_ format: MTLPixelFormat, _ storage: MTLStorageMode) -> MTLTexture {
             let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
-            d.textureType = sampleCount > 1 ? .type2DMultisample : .type2D
-            d.sampleCount = sampleCount
             d.usage = .renderTarget
-            d.storageMode = .memoryless
+            d.storageMode = storage
             return device.makeTexture(descriptor: d)!
         }
-        let t = (accum: make(Self.accumFormat), reveal: make(Self.revealFormat))
-        oitTargets = t
+        let t = TransparentTargets(accum: make(Self.accumFormat, .memoryless), reveal: make(Self.revealFormat, .memoryless),
+                                   depth: make(Self.depthFormat, .private))
+        transparentTargets = t
         return t
     }
 
@@ -126,6 +129,8 @@ public final class Renderer {
         let cellGrid: Mesh
         /// Unrotated 4D centroid of each cell (not normalised).
         let cellCentroids: MTLBuffer
+        /// Unrotated 4D centroid of each face (not normalised), indexed by the face triangles' info.y.
+        let faceCentroids: MTLBuffer
         let edgeRadius: Float
         /// Keyring framing: takes a cell centroid to the projection pole (0,0,0,1), so the pole sits on
         /// that centroid's Hopf fibre and every vertex ring stays bounded in the stereographic view.
@@ -186,17 +191,20 @@ public final class Renderer {
             library = try device.makeLibrary(source: try shaderSource(), options: options)
         }
 
-        // Every pipeline declares the two OIT attachments (the pass always has them); only faces write them.
+        // Opaque pipelines run in the multisampled pass (colour only). Transparent ones run in the
+        // single-sample pass, which always carries the two OIT attachments; only faces / cells write them.
         func pipeline(_ vs: String, _ fs: String, blend: Bool, alphaToCoverage: Bool = false,
-                      accumulate: Bool = false) throws -> MTLRenderPipelineState {
+                      transparent: Bool = false, accumulate: Bool = false) throws -> MTLRenderPipelineState {
             let d = MTLRenderPipelineDescriptor()
             d.vertexFunction = library.makeFunction(name: vs)
             d.fragmentFunction = library.makeFunction(name: fs)
-            d.rasterSampleCount = sampleCount
+            d.rasterSampleCount = transparent ? 1 : sampleCount
             d.isAlphaToCoverageEnabled = alphaToCoverage && sampleCount > 1
             d.colorAttachments[0].pixelFormat = colorFormat
-            d.colorAttachments[1].pixelFormat = Self.accumFormat
-            d.colorAttachments[2].pixelFormat = Self.revealFormat
+            if transparent {
+                d.colorAttachments[1].pixelFormat = Self.accumFormat
+                d.colorAttachments[2].pixelFormat = Self.revealFormat
+            }
             d.depthAttachmentPixelFormat = Self.depthFormat
             if blend {
                 let c = d.colorAttachments[0]!
@@ -216,7 +224,7 @@ public final class Renderer {
                 r.isBlendingEnabled = true
                 r.sourceRGBBlendFactor = .zero; r.sourceAlphaBlendFactor = .zero
                 r.destinationRGBBlendFactor = .oneMinusSourceColor; r.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            } else {
+            } else if transparent {
                 d.colorAttachments[1].writeMask = []
                 d.colorAttachments[2].writeMask = []
             }
@@ -224,12 +232,12 @@ public final class Renderer {
         }
         pipelines = Pipelines(
             background: try pipeline("background_vs", "background_fs", blend: false),
-            fade: try pipeline("background_vs", "fade_fs", blend: true),
+            fade: try pipeline("background_vs", "fade_fs", blend: true, transparent: true),
             edge: try pipeline("edge_vs", "opaque_fs", blend: false, alphaToCoverage: true),
             vertex: try pipeline("vertex_vs", "opaque_fs", blend: false, alphaToCoverage: true),
-            face: try pipeline("face_vs", "face_fs", blend: false, accumulate: true),
-            cell: try pipeline("cell_vs", "cell_fs", blend: false, accumulate: true),
-            composite: try pipeline("background_vs", "oit_composite_fs", blend: true))
+            face: try pipeline("face_vs", "face_fs", blend: false, transparent: true, accumulate: true),
+            cell: try pipeline("cell_vs", "cell_fs", blend: false, transparent: true, accumulate: true),
+            composite: try pipeline("background_vs", "oit_composite_fs", blend: true, transparent: true))
     }
 
     private func model(_ kind: PolytopeKind) -> Model {
@@ -287,6 +295,9 @@ public final class Renderer {
                       // Budget of the earlier 70% cells, measured at a steady 120 fps on the 600-cell.
                       cellGrid: grid(level: gridLevel(p.edgeLength * 0.7)),
                       cellCentroids: buffer(centroids.map { SIMD4<Float>($0) }),
+                      faceCentroids: buffer(p.faces.map { f in
+                          SIMD4<Float>(f.reduce(Vec4.zero) { $0 + p.vertices[$1] } / Double(f.count))
+                      }),
                       edgeRadius: Float(0.012 * pow(p.edgeLength, 0.4)),
                       framing: Rotation4.aligning(p.cellCentres[0], to: Vec4(0, 0, 0, 1)))
         models[kind] = m
@@ -345,44 +356,68 @@ public final class Renderer {
             cellColor: t.cellColor(frame.kind),
             // Phase wrapped per group cycle to keep float precision over long sessions.
             cells: [Float(frame.highlight.truncatingRemainder(dividingBy: Double(m.highlightGroups))),
-                    Float(m.highlightGroups), 0, 0])
+                    Float(m.highlightGroups), Float(Slideshow.highlightHandoverStart), 0])
     }
 
     public func encode(_ frame: FrameState, pass: MTLRenderPassDescriptor, size: CGSize,
                        commandBuffer: MTLCommandBuffer) {
         guard let p = pipelines, let target = pass.colorAttachments[0].texture else { return }
-        let t = oit(width: target.width, height: target.height)
-        for (i, tex, clear) in [(1, t.accum, MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)),
-                                (2, t.reveal, MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1))] {
-            let a = pass.colorAttachments[i]!
-            a.texture = tex
-            a.loadAction = .clear
-            a.storeAction = .dontCare
-            a.clearColor = clear
-        }
-        guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        let t = transparentTargets(width: target.width, height: target.height)
         let m = model(frame.kind)
         var u = uniforms(frame, model: m, size: size)
         let uSize = MemoryLayout<Uniforms>.stride
 
-        enc.setVertexBytes(&u, length: uSize, index: 2)
-        enc.setFragmentBytes(&u, length: uSize, index: 0)
-
-        enc.setDepthStencilState(depthOff)
-        enc.setRenderPipelineState(p.background)
-        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-
-        func draw(_ mesh: Mesh, _ inst: MTLBuffer, count: Int) {
+        // Pass 1, multisampled: background and frame. Colour resolves into the output as configured by
+        // the caller; depth resolves (or, single-sampled, is stored) into `t.depth` for pass 2.
+        if sampleCount > 1 {
+            pass.depthAttachment.resolveTexture = t.depth
+            pass.depthAttachment.depthResolveFilter = .sample0
+            pass.depthAttachment.storeAction = .multisampleResolve
+        } else {
+            pass.depthAttachment.texture = t.depth
+            pass.depthAttachment.storeAction = .store
+        }
+        func draw(_ enc: MTLRenderCommandEncoder, _ mesh: Mesh, _ inst: MTLBuffer, count: Int) {
             enc.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
             enc.setVertexBuffer(inst, offset: 0, index: 1)
             enc.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount, indexType: .uint32,
                                       indexBuffer: mesh.indices, indexBufferOffset: 0, instanceCount: count)
         }
-        enc.setDepthStencilState(depthWrite)
-        enc.setRenderPipelineState(p.edge)
-        draw(tube, m.edges, count: m.polytope.edges.count)
-        enc.setRenderPipelineState(p.vertex)
-        draw(sphere, m.vertices, count: m.polytope.vertices.count)
+
+        guard let opaque = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        opaque.setVertexBytes(&u, length: uSize, index: 2)
+        opaque.setFragmentBytes(&u, length: uSize, index: 0)
+        opaque.setDepthStencilState(depthOff)
+        opaque.setRenderPipelineState(p.background)
+        opaque.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        opaque.setDepthStencilState(depthWrite)
+        opaque.setRenderPipelineState(p.edge)
+        draw(opaque, tube, m.edges, count: m.polytope.edges.count)
+        opaque.setRenderPipelineState(p.vertex)
+        draw(opaque, sphere, m.vertices, count: m.polytope.vertices.count)
+        opaque.endEncoding()
+
+        // Pass 2, single-sampled: faces / cells into the OIT accumulators over the resolved frame. The
+        // bubbles' soft Fresnel edges need no multisampling, and blending once per pixel rather than per
+        // sample is most of their cost.
+        let second = MTLRenderPassDescriptor()
+        second.colorAttachments[0].texture = pass.colorAttachments[0].resolveTexture ?? target
+        second.colorAttachments[0].loadAction = .load
+        second.colorAttachments[0].storeAction = .store
+        for (i, tex, clear) in [(1, t.accum, MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)),
+                                (2, t.reveal, MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1))] {
+            let a = second.colorAttachments[i]!
+            a.texture = tex
+            a.loadAction = .clear
+            a.storeAction = .dontCare
+            a.clearColor = clear
+        }
+        second.depthAttachment.texture = t.depth
+        second.depthAttachment.loadAction = .load
+        second.depthAttachment.storeAction = .dontCare
+        guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: second) else { return }
+        enc.setVertexBytes(&u, length: uSize, index: 2)
+        enc.setFragmentBytes(&u, length: uSize, index: 0)
 
         enc.setDepthStencilState(depthRead)
         enc.setCullMode(.none)
@@ -391,7 +426,8 @@ public final class Renderer {
             break
         case .faces:
             enc.setRenderPipelineState(p.face)
-            draw(m.grid, m.faces, count: m.faceCount)
+            enc.setVertexBuffer(m.faceCentroids, offset: 0, index: 3)
+            draw(enc, m.grid, m.faces, count: m.faceCount)
         case .cells:
             enc.setRenderPipelineState(p.cell)
             enc.setVertexBuffer(m.cellCentroids, offset: 0, index: 3)
@@ -400,7 +436,8 @@ public final class Renderer {
             // Only the highlighted ring is drawn, plus the next one during the hand-over (as in cell_vs).
             let n = m.highlightGroups
             let phase = frame.highlight.truncatingRemainder(dividingBy: Double(n))
-            let current = Int(phase), handover = smoothstep(0.6, 1.0, phase - Double(current))
+            let current = Int(phase)
+            let handover = smoothstep(Slideshow.highlightHandoverStart, 1.0, phase - Double(current))
             for g in handover > 0 ? [current, (current + 1) % n] : [current] {
                 let r = m.groupRanges[g]
                 enc.drawIndexedPrimitives(type: .triangle, indexCount: m.cellGrid.indexCount, indexType: .uint32,
@@ -433,8 +470,43 @@ public final class Renderer {
         return true
     }
 
+    /// GPU milliseconds for each of `frames` offscreen renders, the rotation advancing between them
+    /// (development benchmark: compares rendering modes at a given drawable size).
+    public func gpuTimes(_ show: Slideshow, width: Int, height: Int, frames: Int) -> [Double] {
+        let (pass, _) = offscreenPass(width: width, height: height)
+        var times: [Double] = []
+        for _ in 0..<frames {
+            show.advance(by: 1.0 / 120)
+            guard let cb = queue.makeCommandBuffer() else { break }
+            encode(show.frame(), pass: pass, size: CGSize(width: width, height: height), commandBuffer: cb)
+            cb.commit()
+            cb.waitUntilCompleted()
+            times.append((cb.gpuEndTime - cb.gpuStartTime) * 1000)
+        }
+        return times
+    }
+
     /// Render one frame offscreen and return it as an sRGB image.
     public func snapshot(_ frame: FrameState, width: Int, height: Int) -> CGImage? {
+        precondition(!hdr, "snapshots read back 8-bit sRGB; use an SDR renderer")
+        let (pass, resolve) = offscreenPass(width: width, height: height)
+        guard let cb = queue.makeCommandBuffer() else { return nil }
+        encode(frame, pass: pass, size: CGSize(width: width, height: height), commandBuffer: cb)
+        cb.commit()
+        cb.waitUntilCompleted()
+
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        resolve.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
+                                                | CGImageAlphaInfo.premultipliedFirst.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
+    /// Offscreen pass (multisampled when sampleCount > 1) and its single-sample resolve texture.
+    private func offscreenPass(width: Int, height: Int) -> (MTLRenderPassDescriptor, MTLTexture) {
         func texture(_ format: MTLPixelFormat, samples: Int, usage: MTLTextureUsage, storage: MTLStorageMode) -> MTLTexture {
             let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
             d.textureType = samples > 1 ? .type2DMultisample : .type2D
@@ -443,7 +515,6 @@ public final class Renderer {
             d.storageMode = storage
             return device.makeTexture(descriptor: d)!
         }
-        precondition(!hdr, "snapshots read back 8-bit sRGB; use an SDR renderer")
         let resolve = texture(colorFormat, samples: 1, usage: [.renderTarget, .shaderRead], storage: .shared)
         let pass = MTLRenderPassDescriptor()
         if sampleCount > 1 {
@@ -459,20 +530,7 @@ public final class Renderer {
         pass.depthAttachment.loadAction = .clear
         pass.depthAttachment.storeAction = .dontCare
         pass.depthAttachment.clearDepth = 1
-
-        guard let cb = queue.makeCommandBuffer() else { return nil }
-        encode(frame, pass: pass, size: CGSize(width: width, height: height), commandBuffer: cb)
-        cb.commit()
-        cb.waitUntilCompleted()
-        
-        var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        resolve.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
-        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                       bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
-                                                | CGImageAlphaInfo.premultipliedFirst.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        return (pass, resolve)
     }
 }
 

@@ -28,7 +28,7 @@ struct Uniforms {
     float4 metalTint;   // x: how far reflections take the base colour (0 steel, 1 brass)
     float4 glass;       // glass alpha, bubble alpha, seam brightness
     float4 cellColor;   // rgb, opacity (only the highlighted Hopf ring is drawn)
-    float4 cells;       // highlight phase, highlight groups
+    float4 cells;       // highlight phase, highlight groups, hand-over start (fraction of a slot)
 };
 
 // EDR gain for highlights; 1 on SDR displays.
@@ -314,12 +314,14 @@ struct FaceOut {
     float lambda;
     float4 obj;
     float3 border;      // distance to each polygon-border side of the fan triangle, in edge lengths (10: not a border)
+    float presence [[flat]];    // whole-face fade as its centroid nears the pole (as for cells)
 };
 
 vertex FaceOut face_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
                        const device float2* tmpl [[buffer(0)]],
                        const device Instance* inst [[buffer(1)]],
-                       constant Uniforms& u [[buffer(2)]]) {
+                       constant Uniforms& u [[buffer(2)]],
+                       const device float4* centroids [[buffer(3)]]) {
     float2 bc = tmpl[vid];
     Instance f = inst[iid];
     float4 a = u.rot4 * f.a, b = u.rot4 * f.b, c = u.rot4 * f.c;
@@ -346,6 +348,11 @@ vertex FaceOut face_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.border = float3(wa * twiceArea / lbc,
                       (flags & 1) ? wc * twiceArea / lab : 10.0 * lbc,
                       (flags & 2) ? wb * twiceArea / lac : 10.0 * lbc) / lbc;
+
+    // Faces near the pole balloon across the screen; fade them whole, and skip rasterising
+    // faded-out ones entirely (a clip-space position outside the view culls the triangle).
+    o.presence = 1.0 - smoothstep(2.5, 5.0, project4(u.rot4 * centroids[int(f.info.y + 0.5)], u).lambda);
+    if (o.presence < 1e-3) o.position = float4(0.0, 0.0, 2.0, 1.0);
     return o;
 }
 
@@ -357,6 +364,10 @@ struct OITOut {
 // Solid glass (perspective) morphing into soap-film bubbles (stereographic), weighted into the OIT targets.
 fragment OITOut face_fs(FaceOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
     if (in.valid < 0.999 || in.lambda > u.pole.z) discard_fragment();
+    // Cheap visibility first: near-camera and pole fades. Fragments they erase skip all shading.
+    float dist = length(u.cameraPos.xyz - in.world);
+    float visibility = smoothstep(u.fog.y, u.fog.z, dist) * poleVisibility(in.lambda, u) * in.presence;
+    if (visibility < 0.004) discard_fragment();
     float glow = 0.5 * dissolve(in.obj, 0.35, u);
     float3 n = normalize(in.normal);
     float3 V = normalize(u.cameraPos.xyz - in.world);
@@ -366,26 +377,33 @@ fragment OITOut face_fs(FaceOut in [[stage_in]], constant Uniforms& u [[buffer(0
     float3 H = normalize(L + V);
     float3 env = environment(reflect(-V, n), u);
     float schlick = pow(1.0 - facing, 5.0);
+    float NoH = saturate(dot(n, H));
     float t = smoothstep(0.0, 1.0, u.proj.y);
     float body = 0.55 * saturate(dot(n, L)) + 0.35 * (0.5 + 0.5 * n.y) + 0.1;
 
+    // t is uniform across the frame, so outside the morph only one material is evaluated.
     // Glass: substantial body, Fresnel reflection, sharp highlight, bright seams along the polygon border.
-    float d = min(in.border.x, min(in.border.y, in.border.z));
-    float seam = 1.0 - smoothstep(0.0, 0.08, d);
-    float aGlass = u.glass.x + (1.0 - u.glass.x) * 0.6 * schlick + 0.02 * seam;
-    float3 lGlass = (0.04 + 0.96 * schlick) * 0.8 * env
-                  + pow(saturate(dot(n, H)), 120.0) * u.style.z * highlightGain(u)
-                  + mix(in.color, float3(1.0), 0.5) * seam * u.glass.z;
-
+    float aGlass = 0.0;
+    float3 lGlass = 0.0;
+    if (t < 1.0) {
+        float d = min(in.border.x, min(in.border.y, in.border.z));
+        float seam = 1.0 - smoothstep(0.0, 0.08, d);
+        aGlass = u.glass.x + (1.0 - u.glass.x) * 0.6 * schlick + 0.02 * seam;
+        lGlass = (0.04 + 0.96 * schlick) * 0.8 * env
+               + pow(NoH, 120.0) * u.style.z * highlightGain(u)
+               + mix(in.color, float3(1.0), 0.5) * seam * u.glass.z;
+    }
     // Bubble: nearly clear face-on, the film thickening towards its silhouette; broad soft highlight.
-    float aBubble = u.glass.y + 0.55 * pow(1.0 - facing, 2.5);
-    float3 lBubble = (0.03 + 0.97 * schlick) * 0.6 * env
-                   + pow(saturate(dot(n, H)), 30.0) * 0.5 * u.style.z * highlightGain(u);
+    float aBubble = 0.0;
+    float3 lBubble = 0.0;
+    if (t > 0.0) {
+        aBubble = u.glass.y + 0.55 * pow(1.0 - facing, 2.5);
+        lBubble = (0.03 + 0.97 * schlick) * 0.6 * env + pow(NoH, 30.0) * 0.5 * u.style.z * highlightGain(u);
+    }
 
     float alpha = saturate(mix(aGlass, aBubble, t));
     float3 c = in.color * body + mix(lGlass, lBubble, t) / max(alpha, 1e-3);
-    float dist = length(u.cameraPos.xyz - in.world);
-    alpha *= smoothstep(u.fog.y, u.fog.z, dist) * poleVisibility(in.lambda, u);
+    alpha *= visibility;
     c = toneCeiling(applyFog(ember(c, glow, u), in.world, in.lambda, u), u);
     alpha = mix(alpha, 0.5, glow);
 
@@ -435,10 +453,10 @@ vertex CellOut cell_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     Projected qv = project4(p + h * (c - a), u);
     Projected pc = project4(u.rot4 * c0, u);
 
-    // Highlight: group floor(phase) hands over to the next during the last 40% of its slot.
+    // Highlight: group floor(phase) hands over to the next from the hand-over start to the end of its slot.
     float n = u.cells.y, g = f.info.x;
     float current = floor(u.cells.x), next = fmod(current + 1.0, n);
-    float k = smoothstep(0.6, 1.0, fract(u.cells.x));
+    float k = smoothstep(u.cells.z, 1.0, fract(u.cells.x));
     float active = (abs(g - current) < 0.5 ? 1.0 - k : 0.0) + (abs(g - next) < 0.5 ? k : 0.0);
 
     CellOut o;

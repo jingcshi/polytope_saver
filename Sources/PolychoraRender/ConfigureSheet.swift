@@ -27,6 +27,7 @@ public final class ConfigureSheet: NSObject {
     private let pan = ConfigureSheet.speedSlider()
     private let motion = ConfigureSheet.speedSlider()
     private let rotation = ConfigureSheet.speedSlider()
+    private let targetFPS = ConfigureSheet.fpsSlider()
     private let info = NSButton(checkboxWithTitle: "Show info card", target: nil, action: nil)
     private let clock = NSButton(checkboxWithTitle: "Show clock", target: nil, action: nil)
     private let fps = NSButton(checkboxWithTitle: "Show frame rate", target: nil, action: nil)
@@ -43,9 +44,20 @@ public final class ConfigureSheet: NSObject {
 
     private static func speed(of slider: NSSlider) -> Double { pow(2, slider.doubleValue) }
 
-    /// Slider with "Slow" / "Fast" captions under its ends.
-    private static func captioned(_ slider: NSSlider) -> NSView {
-        func caption(_ text: String) -> NSTextField {
+    /// Discrete slider over `PolychoraSettings.targetFPSSteps`, one tick per value.
+    private static func fpsSlider() -> NSSlider {
+        let steps = PolychoraSettings.targetFPSSteps
+        let s = NSSlider(value: 0, minValue: 0, maxValue: Double(steps.count - 1), target: nil, action: nil)
+        s.numberOfTickMarks = steps.count
+        s.allowsTickMarkValuesOnly = true
+        s.tickMarkPosition = .below
+        s.widthAnchor.constraint(equalToConstant: sliderWidth).isActive = true
+        return s
+    }
+
+    /// Slider with captions under its ends ("Slow" / "Fast"), or one per tick mark when given as many.
+    private static func captioned(_ slider: NSSlider, _ texts: [String] = ["Slow", "Fast"]) -> NSView {
+        let captions = texts.map { text in
             let l = NSTextField(labelWithString: text)
             l.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             l.textColor = .secondaryLabelColor
@@ -53,19 +65,26 @@ public final class ConfigureSheet: NSObject {
             return l
         }
         let box = NSView()
-        let slow = caption("Slow"), fast = caption("Fast")
         slider.translatesAutoresizingMaskIntoConstraints = false
-        [slider, slow, fast].forEach(box.addSubview)
-        NSLayoutConstraint.activate([
+        ([slider] + captions).forEach(box.addSubview)
+        let first = captions.first!, last = captions.last!
+        var constraints = [
             slider.topAnchor.constraint(equalTo: box.topAnchor),
             slider.leadingAnchor.constraint(equalTo: box.leadingAnchor),
             slider.trailingAnchor.constraint(equalTo: box.trailingAnchor),
-            slow.topAnchor.constraint(equalTo: slider.bottomAnchor, constant: 1),
-            fast.topAnchor.constraint(equalTo: slow.topAnchor),
-            slow.leadingAnchor.constraint(equalTo: slider.leadingAnchor),
-            fast.trailingAnchor.constraint(equalTo: slider.trailingAnchor),
-            slow.bottomAnchor.constraint(equalTo: box.bottomAnchor),
-        ])
+            first.leadingAnchor.constraint(equalTo: slider.leadingAnchor),
+            last.trailingAnchor.constraint(equalTo: slider.trailingAnchor),
+            first.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+        ]
+        constraints += captions.map { $0.topAnchor.constraint(equalTo: slider.bottomAnchor, constant: 1) }
+        // Inner captions centre on their tick marks, which span the track inset by the knob's half-width.
+        let inset: CGFloat = 10, n = CGFloat(captions.count - 1)
+        for (i, c) in captions.enumerated().dropFirst().dropLast() {
+            let f = CGFloat(i) / n
+            constraints.append(NSLayoutConstraint(item: c, attribute: .centerX, relatedBy: .equal, toItem: box,
+                                                  attribute: .trailing, multiplier: f, constant: inset * (1 - 2 * f)))
+        }
+        NSLayoutConstraint.activate(constraints)
         return box
     }
 
@@ -93,13 +112,14 @@ public final class ConfigureSheet: NSObject {
         pan.doubleValue = log2(settings.panSpeed)
         motion.doubleValue = log2(settings.motionSpeed)
         rotation.doubleValue = log2(settings.speed)
+        targetFPS.doubleValue = Double(PolychoraSettings.targetFPSSteps.firstIndex(of: settings.targetFPS) ?? 1)
         info.state = settings.showInfo ? .on : .off
         clock.state = settings.showClock ? .on : .off
         fps.state = settings.showFPS ? .on : .off
 
         var rows: [[NSView]] = [
             ("Projection:", projection), ("Fly-through:", fly), ("Theme:", theme),
-            ("Surfaces:", surfaces), ("Frame Colors:", frameColors),
+            ("Surfaces:", surfaces), ("Frame colors:", frameColors),
         ].map { [NSTextField(labelWithString: $0.0), $0.1] }
         var sliderLabels: [(NSTextField, NSSlider)] = []
         for (title, slider) in [("Animation speed:", animation), ("Pan speed:", pan), ("Motion speed:", motion), ("Rotation speed:", rotation)] {
@@ -107,6 +127,9 @@ public final class ConfigureSheet: NSObject {
             sliderLabels.append((label, slider))
             rows.append([label, Self.captioned(slider)])
         }
+        let fpsLabel = NSTextField(labelWithString: "Target frame rate:")
+        sliderLabels.append((fpsLabel, targetFPS))
+        rows.append([fpsLabel, Self.captioned(targetFPS, PolychoraSettings.targetFPSSteps.map(String.init))])
         rows += [info, clock, fps].map { [NSGridCell.emptyContentView, $0] }
 
         let grid = NSGridView(views: rows)
@@ -157,6 +180,7 @@ public final class ConfigureSheet: NSObject {
         settings.panSpeed = Self.speed(of: pan)
         settings.motionSpeed = Self.speed(of: motion)
         settings.speed = Self.speed(of: rotation)
+        settings.targetFPS = PolychoraSettings.targetFPSSteps[targetFPS.integerValue]
         settings.flyThrough = .init(rawValue: fly.indexOfSelectedItem) ?? .large
         let s = surfaces.indexOfSelectedItem, cases = PolychoraSettings.Surfaces.allCases
         settings.surfaces = cases.indices.contains(s) ? cases[s] : .faces

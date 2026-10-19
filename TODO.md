@@ -99,4 +99,4 @@
 - [x] Verified that the options sheet closes via `configureSheetDidEnd` and the host app's activation (PaperSaver) works.
 - [x] Speed constants calibrated: spin 2 s × √ω, approach/withdraw 9 s, pan 36 s, hold 36 s (all at speed 1); slider range ¼×–4×.
 - [x] Fly-through tuned
-- [x] Faces and cells drawn in a single-sample pass after the 4× MSAA frame pass (colour and depth resolved), cutting 600-cell stereographic faces from 4.4 to 3.1 ms GPU at 3456×2234. "Target frame rate" option (30 / 60 / 90 / 120, default 60) for less capable Macs.
+- [x] Faces and cells drawn in a single-sample pass after the 4× MSAA frame pass (colour and depth resolved), cutting 600-cell stereographic faces from 4.4 to 3.1 ms GPU at 3456×2234. "Target frame rate" option (30 / 60 / 120, default 60) for less capable Macs; 90 dropped because display links only run at divisors of the 120 Hz refresh. Below 120, animation time advances in whole refresh intervals and frames present at even spacing (`present(afterMinimumDuration:)`).

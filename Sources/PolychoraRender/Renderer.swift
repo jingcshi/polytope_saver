@@ -458,14 +458,19 @@ public final class Renderer {
         enc.endEncoding()
     }
 
-    /// Returns false if no drawable was available.
+    /// Presents at least `interval` seconds after the previous frame, so reduced frame rates hold
+    /// each frame for the same number of refreshes. Returns false if no drawable was available.
     @discardableResult
-    public func draw(_ frame: FrameState, in view: MTKView) -> Bool {
+    public func draw(_ frame: FrameState, in view: MTKView, interval: Double = 0) -> Bool {
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
               let cb = queue.makeCommandBuffer() else { return false }
         let target = drawable.texture
         encode(frame, pass: pass, size: CGSize(width: target.width, height: target.height), commandBuffer: cb)
-        cb.present(drawable)
+        if interval > 0 {
+            cb.present(drawable, afterMinimumDuration: interval)
+        } else {
+            cb.present(drawable)
+        }
         cb.commit()
         return true
     }

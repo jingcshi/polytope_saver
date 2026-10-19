@@ -108,8 +108,9 @@ public struct PolychoraSettings: Sendable {
 
     /// Range of the speed multipliers; the options sheet maps them onto log2-scaled sliders.
     public static let speedRange: ClosedRange<Double> = 0.25...4
-    /// Values offered for `targetFPS`.
-    public static let targetFPSSteps = [30, 60, 90, 120]
+    /// Values offered for `targetFPS`. Display links only run at divisors of the refresh rate, so on
+    /// 120 Hz displays 90 would fall back to 60.
+    public static let targetFPSSteps = [30, 60, 120]
 
     public init() {}
 

@@ -34,6 +34,12 @@ if let out = argument("--snapshot") {
     let renderer = try Renderer(device: device, sampleCount: 4, shaderSource: loadShader)
     renderer.theme = Theme.named(settings.theme)
     if argument("--coloring") == "rings" { renderer.coloring = .rings }
+    switch argument("--surfaces") {
+    case "cells": renderer.surfaces = .cells
+    case "none": renderer.surfaces = .none
+    default: break
+    }
+    if argument("--frame") == "signature" { renderer.frameColors = .signature }
     let show = Slideshow(settings: settings, randomStart: false)
     show.seek(timeline: 10, rotation: time)
     show.overrideStereo(Double(argument("--stereo") ?? "0") ?? 0)
@@ -129,6 +135,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "l": update { $0.overlayLayout = .init(rawValue: ($0.overlayLayout.rawValue + 1) % 2)! }
         case "c": update { $0.showClock.toggle() }
         case "g": update { $0.showFPS.toggle() }
+        case "s":
+            update { s in
+                let all = PolychoraSettings.Surfaces.allCases
+                s.surfaces = all[((all.firstIndex(of: s.surfaces) ?? 0) + 1) % all.count]
+            }
+        case "m": update { $0.frameColors = $0.frameColors == .steel ? .signature : .steel }
         case "=", "+": update { $0.speed = min($0.speed * 1.25, 8) }
         case "-": update { $0.speed = max($0.speed / 1.25, 0.1) }
         case " ": view.paused.toggle()
@@ -143,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func printHelp() {
         print("""
         keys: ←/→ prev/next · 1-6 pick polytope · 0 cycle all · p projection mode · t theme
-              i info · l info layout · v fly-through · c clock · g frame rate · +/- speed · space pause · r reload shaders · f fullscreen · h help
+              i info · l info layout · v fly-through · c clock · g frame rate · s surfaces · m frame colours · +/- speed · space pause · r reload shaders · f fullscreen · h help
         shader: \(shaderURL.path) (auto-reloads on save)
         """)
     }

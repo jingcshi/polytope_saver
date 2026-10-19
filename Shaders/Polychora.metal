@@ -27,6 +27,8 @@ struct Uniforms {
     float4 metal;       // specular exponent, reflection, softbox, diffuse
     float4 metalTint;   // x: how far reflections take the base colour (0 steel, 1 brass)
     float4 glass;       // glass alpha, bubble alpha, seam brightness
+    float4 cellColor;   // rgb, opacity (only the highlighted Hopf ring is drawn)
+    float4 cells;       // highlight phase, highlight groups
 };
 
 // EDR gain for highlights; 1 on SDR displays.
@@ -388,6 +390,116 @@ fragment OITOut face_fs(FaceOut in [[stage_in]], constant Uniforms& u [[buffer(0
     alpha = mix(alpha, 0.5, glow);
 
     // McGuire & Bavoil's depth weight (their eq. 10), with distances in our scene units.
+    float w = alpha * clamp(10.0 / (1e-5 + pow(dist / 5.0, 2.0) + pow(dist / 200.0, 6.0)), 1e-2, 3e3);
+    OITOut o;
+    o.accum = float4(c * alpha, alpha) * w;
+    o.reveal = alpha;
+    return o;
+}
+
+// MARK: Cells (acrylic in perspective, jelly in stereographic)
+
+// Each cell's size as a fraction of its full size about its centroid (1: cells meet at shared faces).
+constant float kCellScale = 1.0;
+
+struct CellOut {
+    float4 position [[position]];
+    float3 world;
+    float3 normal;
+    float3 color [[flat]];
+    float opacity [[flat]];     // fades in / out with the ring hand-over
+    float valid;
+    float lambda;
+    float4 obj;
+    float3 centre [[flat]];     // projected cell centroid
+    float radius [[flat]];      // projected circumradius: the cell's proxy sphere for thickness
+    float presence [[flat]];    // fades cells whose centroid nears the pole (they would engulf the view)
+};
+
+vertex CellOut cell_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
+                       const device float2* tmpl [[buffer(0)]],
+                       const device Instance* inst [[buffer(1)]],
+                       constant Uniforms& u [[buffer(2)]],
+                       const device float4* centroids [[buffer(3)]]) {
+    Instance f = inst[iid];
+    int cell = int(f.info.y + 0.5);
+    float4 c0 = centroids[cell];
+    float4 oa = c0 + kCellScale * (f.a - c0), ob = c0 + kCellScale * (f.b - c0), oc = c0 + kCellScale * (f.c - c0);
+
+    float2 bc = tmpl[vid];
+    float4 a = u.rot4 * oa, b = u.rot4 * ob, c = u.rot4 * oc;
+    const float h = 0.01;
+    float4 p = a + bc.x * (b - a) + bc.y * (c - a);
+    Projected q = project4(p, u);
+    Projected qu = project4(p + h * (b - a), u);
+    Projected qv = project4(p + h * (c - a), u);
+    Projected pc = project4(u.rot4 * c0, u);
+
+    // Highlight: group floor(phase) hands over to the next during the last 40% of its slot.
+    float n = u.cells.y, g = f.info.x;
+    float current = floor(u.cells.x), next = fmod(current + 1.0, n);
+    float k = smoothstep(0.6, 1.0, fract(u.cells.x));
+    float active = (abs(g - current) < 0.5 ? 1.0 - k : 0.0) + (abs(g - next) < 0.5 ? k : 0.0);
+
+    CellOut o;
+    o.position = u.viewProj * float4(q.p, 1.0);
+    o.world = q.p;
+    o.normal = normalize(cross(qu.p - q.p, qv.p - q.p));
+    o.color = u.cellColor.rgb;
+    o.opacity = u.cellColor.a * active;
+    o.valid = q.valid * pc.valid;
+    o.lambda = q.lambda;
+    o.obj = oa + bc.x * (ob - oa) + bc.y * (oc - oa);
+    o.centre = pc.p;
+    o.radius = length(project4(a, u).p - pc.p);
+    o.presence = 1.0 - smoothstep(2.5, 5.0, pc.lambda);
+    return o;
+}
+
+// Front surfaces only; each cell is one translucent volume whose opacity follows Beer–Lambert over
+// its thickness along the view ray. Thickness comes from the chord through the proxy sphere
+// (exact for a ball, a close upper bound for a convex cell), so no back-face depth pass is needed.
+fragment OITOut cell_fs(CellOut in [[stage_in]], constant Uniforms& u [[buffer(0)]]) {
+    if (in.valid < 0.999 || in.lambda > u.pole.z || in.presence * in.opacity < 1e-3) discard_fragment();
+    float3 n = normalize(in.normal);
+    if (dot(n, in.world - in.centre) < 0.0) n = -n;    // outward
+    float3 V = normalize(u.cameraPos.xyz - in.world);
+    float facing = dot(n, V);
+    if (facing <= 0.0) discard_fragment();
+    float glow = 0.5 * dissolve(in.obj, 0.35, u);
+
+    float3 oc = in.centre - u.cameraPos.xyz;
+    float along = dot(oc, -V);
+    float b2 = max(dot(oc, oc) - along * along, 0.0);
+    float tau = sqrt(saturate(1.0 - b2 / max(in.radius * in.radius, 1e-8)));    // chord / diameter
+
+    float3 L = normalize(u.lightDir.xyz);
+    float3 H = normalize(L + V);
+    float3 env = environment(reflect(-V, n), u);
+    float schlick = pow(1.0 - facing, 5.0);
+    float t = smoothstep(0.0, 1.0, u.proj.y);
+    float hemi = 0.5 + 0.5 * n.y;
+
+    // Acrylic: clear tinted solid, depth of colour from thickness, crisp reflections.
+    float aAcrylic = 1.0 - exp(-1.4 * tau);
+    float3 cAcrylic = in.color * (0.55 * saturate(dot(n, L)) + 0.35 * hemi + 0.1);
+    float3 lAcrylic = (0.04 + 0.96 * schlick) * 0.8 * env
+                    + pow(saturate(dot(n, H)), 150.0) * u.style.z * highlightGain(u);
+
+    // Jelly: light wraps round the body and scatters out lighter where it is thin; soft highlight.
+    float wrap = (dot(n, L) + 0.6) / 1.6;
+    float aJelly = 0.12 + 0.55 * tau;
+    float3 cJelly = mix(in.color * 1.35 + 0.06, in.color * 0.75, tau) * (0.45 + 0.55 * saturate(wrap));
+    float3 lJelly = (0.03 + 0.97 * schlick) * 0.4 * env
+                  + pow(saturate(dot(n, H)), 24.0) * 0.4 * u.style.z * highlightGain(u);
+
+    float alpha = saturate(mix(aAcrylic, aJelly, t));
+    float3 c = mix(cAcrylic, cJelly, t) + mix(lAcrylic, lJelly, t) / max(alpha, 1e-3);
+    float dist = length(u.cameraPos.xyz - in.world);
+    alpha *= in.opacity * smoothstep(u.fog.y, u.fog.z, dist) * poleVisibility(in.lambda, u) * in.presence;
+    c = toneCeiling(applyFog(ember(c, glow, u), in.world, in.lambda, u), u);
+    alpha = mix(alpha, 0.5, glow);
+
     float w = alpha * clamp(10.0 / (1e-5 + pow(dist / 5.0, 2.0) + pow(dist / 200.0, 6.0)), 1e-2, 3e3);
     OITOut o;
     o.accum = float4(c * alpha, alpha) * w;

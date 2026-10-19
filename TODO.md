@@ -15,8 +15,8 @@
 - [ ] Polytope materials and textures (next round). Reference: the "Dimensions" film (Jos Leys, Étienne Ghys, Aurélien Alvarez), whose fly-in and pan our camera independently reproduces.
     - [ ] Glass / acrylic texture, see `references/`. Agreed plan, in order:
       1. [x] Cast-steel framework (tubes and joints at 60% of the old radius): joint spheres at tube radius (seamless union), dark metal with sharp specular and a fake environment reflection from the theme gradient and glow. Neutral steel per theme (Brass stays brass); the signature hue moves to glass and cells.
-      2. Order-independent transparency (weighted blended), then faces: solid glass (perspective; higher alpha, face-border seams, optional screen-space refraction) blending into soft bubbles (stereographic; low alpha, strong Fresnel), driven by `stereo`. Fixes the too-transparent faces.
-      3. Cells, as an options-sheet alternative to faces: shrunk to about 70% about their centroids; acrylic (Beer–Lambert absorption by thickness from a back-face depth pass) blending into jelly (wrap lighting, softer specular, thin-region glow). Colour by Hopf ring (`cellRing`), hue fan of about ±30° around the signature hue with alternating lightness; 5-cell gets a 5-hue fan.
+      2. [x] Order-independent transparency (weighted blended), then faces: solid glass (perspective; higher alpha, face-border seams, optional screen-space refraction) blending into soft bubbles (stereographic; low alpha, strong Fresnel), driven by `stereo`. Fixes the too-transparent faces.
+      3. Cells (built, verify), as an options-sheet alternative to faces ("Surfaces"): shrunk to 70% about their centroids; acrylic (Beer–Lambert absorption by thickness, taken from the view ray's chord through each cell's circumsphere instead of a depth pass); cells fade as their centroid nears the stereographic pole blending into jelly (wrap lighting, softer specular, thin-region glow). Colouring (revised): per theme a standard and an active colour in the signature hue (`Theme.cells`); one Hopf ring (5-cell: one cell) is highlighted at a time, 6 s each with a cross-fade, on a clock that runs only while the polytope rotates. Cells now at full size (`kCellScale`); feathered shells (70% core fading out to full size) looked best but cost too much (below 80 fps, fan audible) and were removed.
     - [x] One signature color palette for each polytope: OKLCH hues red 5-cell 29°, blue tesseract 264°, yellow 16-cell 100°, magenta 24-cell 330°, cyan 120-cell 200°, green 600-cell 145° (swapped for a calmer 600-cell). Per-theme lightness and chroma in `Theme.signature`; options sheet "Edge colours: Signature / Hopf rings".
 
 ## Later
@@ -26,7 +26,6 @@
   - [ ] Gallery: an infinite, Escher-style lit corridor of mathematical art. A real 3D scene, dynamically rendered; parallax or a backdrop cylinder can't cover the pan.
   - [ ] Cyber: remastered retro xscreensaver look. Floating equations, gear arcs and cube tessellations with background bokeh; info panels drawn as a HUD frame.
   - [ ] Void: pure black, a faint distant slate-grey 3D perspective grid as scale anchor, and a minimal distant key light.
-- [ ] Optional cell rendering (shrunken cells, Hopf-ring colouring) as a mode.
 - [ ] The 41 non-prismatic irregular uniform convex polychora
     - [ ] A₄ family (8)
         - Rectified 5-cell

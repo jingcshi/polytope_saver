@@ -15,6 +15,10 @@ public struct FrameState {
     /// Panorama yaw at the projection centre, radians.
     public var yaw: Double = 0
     public var stage: Stage = .view
+    /// Cell highlighting: the integer part picks the highlighted Hopf ring (modulo the ring count),
+    /// the fraction drives the hand-over to the next. Advances only while the polytope rotates,
+    /// independent of the speed dials.
+    public var highlight: Double = 0
 
     /// What the phase indicator shows; changes on events (spin-down done, withdraw done, morph start)
     /// rather than tracking the numbers.
@@ -56,19 +60,25 @@ public final class Slideshow {
         var fly: Double { spin + approach + panorama + withdraw }
     }
 
-    /// Animation speed scales the still-camera phases (hold, pan, fades, morph); motion speed the
+    /// Animation speed scales the still-camera phases (hold, fades, morph); pan speed the panorama; motion speed the
     /// camera travel. Spin-up/down use angular acceleration ∝ √ω, so they last ∝ ω/√ω = √(rotation speed).
     private var durations: Durations {
         let a = 1 / settings.animationSpeed, m = 1 / settings.motionSpeed
         return Durations(hold: Base.hold * a, fade: Base.fade * a, morph: Base.morph * a,
                          spin: Base.spin * max(settings.speed, 0.01).squareRoot(),
-                         approach: Base.approach * m, panorama: Base.panorama * a, withdraw: Base.withdraw * m)
+                         approach: Base.approach * m, panorama: Base.panorama / settings.panSpeed,
+                         withdraw: Base.withdraw * m)
     }
     /// Seconds for the natural rotation to advance by one symmetry period at speed 1.
     public let periodSeconds = 15.0
+    /// Seconds each Hopf ring (or 5-cell cell) stays highlighted.
+    public let highlightSeconds = 6.0
 
     private(set) public var timelineTime: Double = 0
     private(set) public var rotationTime: Double = 0
+    /// Seconds of rotation at full spin, regardless of the speed dials: the highlight clock, which
+    /// pauses whenever the polytope stops (fly-through, including the pan).
+    private(set) public var highlightTime: Double = 0
     private var order: [PolytopeKind] = []
     private var offset = 0
     private var stereoOverride: Double?
@@ -198,11 +208,13 @@ public final class Slideshow {
         let spin = sample(cycle[i], timelineTime - start).spin
         timelineTime += dt
         rotationTime += dt * settings.speed * spin
+        highlightTime += dt * spin
     }
 
-    public func seek(timeline: Double, rotation: Double) {
+    public func seek(timeline: Double, rotation: Double, highlight: Double? = nil) {
         timelineTime = timeline
         rotationTime = rotation
+        highlightTime = highlight ?? timeline
     }
 
     /// Jump to the next (+1) or previous (−1) polytope, fully faded in.
@@ -234,7 +246,8 @@ public final class Slideshow {
                           stereo: stereoOverride ?? s.stereo, fade: s.fade,
                           approach: cameraOverride?.approach ?? s.approach,
                           yaw: cameraOverride?.yaw ?? s.yaw,
-                          stage: stereoOverride == nil ? s.stage : .view)
+                          stage: stereoOverride == nil ? s.stage : .view,
+                          highlight: highlightTime / highlightSeconds)
     }
 }
 

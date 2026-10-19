@@ -90,6 +90,13 @@ public struct Theme: Sendable {
     public struct Glass: Sendable {
         public var glassAlpha, bubbleAlpha, seam: Float
     }
+    /// Cells: only the highlighted Hopf ring is drawn, in this colour.
+    public var cells = CellPalette(L: 0.84, C: 0.14, opacity: 1.0)
+
+    /// OKLCH lightness / chroma (hue from the polytope's signature) and an opacity multiplier.
+    public struct CellPalette: Sendable {
+        public var L, C, opacity: Float
+    }
     /// Info card text colours where the background differs by corner; nil uses `text` everywhere.
     public var cardText: CardText?
 
@@ -107,6 +114,11 @@ public struct Theme: Sendable {
     public func signatureColors(_ kind: PolytopeKind) -> (edge: SIMD3<Float>, vertex: SIMD3<Float>, face: SIMD3<Float>) {
         let h = kind.signatureHue, s = signature
         return (oklch(s.edgeL, s.edgeC, h), oklch(s.vertexL, s.vertexC, h), oklch(s.faceL, s.faceC, h))
+    }
+
+    /// Highlighted cell colour for a polytope, rgb + opacity, in its signature hue.
+    public func cellColor(_ kind: PolytopeKind) -> SIMD4<Float> {
+        SIMD4(oklch(cells.L, cells.C, kind.signatureHue), cells.opacity)
     }
 
     public static let ink = Theme(
@@ -136,6 +148,7 @@ public struct Theme: Sendable {
         signature: .init(edgeL: 0.40, edgeC: 0.095, vertexL: 0.36, vertexC: 0.08,
                          faceL: 0.88, faceC: 0.04, faceAlphaScale: 0.9),
         metal: .init(sharpness: 90, reflection: 0.06, softbox: 4.0, diffuse: 0.5, tint: 0),
+        cells: .init(L: 0.60, C: 0.19, opacity: 1.0),
         cardText: .init(topLeft: [0.86, 0.87, 0.90], topRight: [0.86, 0.87, 0.90],
                         bottomLeft: [0.04, 0.07, 0.13], bottomRight: [0.04, 0.07, 0.13]))
 
@@ -152,7 +165,8 @@ public struct Theme: Sendable {
         highlight: [0.60, 0.40, 0.12],     // gold seams (kintsugi); no EDR boost, the look stays as is
         signature: .init(edgeL: 0.42, edgeC: 0.115, vertexL: 0.37, vertexC: 0.095,
                          faceL: 0.72, faceC: 0.06, faceAlphaScale: 0.85),
-        metal: .init(sharpness: 80, reflection: 0.06, softbox: 4.0, diffuse: 0.5, tint: 0))
+        metal: .init(sharpness: 80, reflection: 0.06, softbox: 4.0, diffuse: 0.5, tint: 0),
+        cells: .init(L: 0.56, C: 0.19, opacity: 1.0))
 
     public static let brass = Theme(
         name: "Brass",
@@ -167,7 +181,8 @@ public struct Theme: Sendable {
         highlight: [1.48, 0.96, 0.46], highlightGain: 2.5, peak: 3.5,    // ember (the original dissolve glow)
         signature: .init(edgeL: 0.74, edgeC: 0.12, vertexL: 0.80, vertexC: 0.10,
                          faceL: 0.50, faceC: 0.06, faceAlphaScale: 0.9),
-        metal: .init(sharpness: 50, reflection: 0.7, softbox: 0.25, diffuse: 0.45, tint: 0.9))
+        metal: .init(sharpness: 50, reflection: 0.7, softbox: 0.25, diffuse: 0.45, tint: 0.9),
+        cells: .init(L: 0.80, C: 0.14, opacity: 1.0))
 
     /// Two light (Porcelain, Sky at dusk is mid-toned), two dark.
     public static let all: [Theme] = [.ink, .sky, .porcelain, .brass]

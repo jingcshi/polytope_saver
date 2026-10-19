@@ -18,12 +18,13 @@ public final class ConfigureSheet: NSObject {
 
     private static let popupWidth: CGFloat = 200, sliderWidth: CGFloat = 240, buttonWidth: CGFloat = 96
 
-    private let polytope = NSPopUpButton()
     private let projection = NSPopUpButton()
     private let theme = NSPopUpButton()
     private let fly = NSPopUpButton()
-    private let coloring = NSPopUpButton()
+    private let surfaces = NSPopUpButton()
+    private let frameColors = NSPopUpButton()
     private let animation = ConfigureSheet.speedSlider()
+    private let pan = ConfigureSheet.speedSlider()
     private let motion = ConfigureSheet.speedSlider()
     private let rotation = ConfigureSheet.speedSlider()
     private let info = NSButton(checkboxWithTitle: "Show info card", target: nil, action: nil)
@@ -75,21 +76,21 @@ public final class ConfigureSheet: NSObject {
         view = stack
         super.init()
 
-        polytope.addItem(withTitle: "Cycle all six")
-        PolytopeKind.allCases.forEach { polytope.addItem(withTitle: $0.info.name) }
-        polytope.selectItem(at: settings.polytope.map { $0.rawValue + 1 } ?? 0)
         PolychoraSettings.Projection.allCases.forEach { projection.addItem(withTitle: $0.label) }
         projection.selectItem(at: settings.projection.rawValue)
         Theme.all.forEach { theme.addItem(withTitle: $0.name) }
         theme.selectItem(withTitle: settings.theme)
         PolychoraSettings.FlyThrough.allCases.forEach { fly.addItem(withTitle: $0.label) }
         fly.selectItem(at: settings.flyThrough.rawValue)
-        PolychoraSettings.Coloring.allCases.forEach { coloring.addItem(withTitle: $0.label) }
-        coloring.selectItem(at: settings.coloring.rawValue)
-        for p in [polytope, projection, fly, theme, coloring] {
+        PolychoraSettings.Surfaces.allCases.forEach { surfaces.addItem(withTitle: $0.label) }
+        surfaces.selectItem(at: PolychoraSettings.Surfaces.allCases.firstIndex(of: settings.surfaces) ?? 1)
+        PolychoraSettings.FrameColors.allCases.forEach { frameColors.addItem(withTitle: $0.label) }
+        frameColors.selectItem(at: settings.frameColors.rawValue)
+        for p in [projection, fly, theme, surfaces, frameColors] {
             p.widthAnchor.constraint(equalToConstant: Self.popupWidth).isActive = true
         }
         animation.doubleValue = log2(settings.animationSpeed)
+        pan.doubleValue = log2(settings.panSpeed)
         motion.doubleValue = log2(settings.motionSpeed)
         rotation.doubleValue = log2(settings.speed)
         info.state = settings.showInfo ? .on : .off
@@ -97,11 +98,11 @@ public final class ConfigureSheet: NSObject {
         fps.state = settings.showFPS ? .on : .off
 
         var rows: [[NSView]] = [
-            ("Polytope:", polytope), ("Projection:", projection), ("Fly-through:", fly),
-            ("Theme:", theme), ("Edge colours:", coloring),
+            ("Projection:", projection), ("Fly-through:", fly), ("Theme:", theme),
+            ("Surfaces:", surfaces), ("Frame Colors:", frameColors),
         ].map { [NSTextField(labelWithString: $0.0), $0.1] }
         var sliderLabels: [(NSTextField, NSSlider)] = []
-        for (title, slider) in [("Animation speed:", animation), ("Motion speed:", motion), ("Rotation speed:", rotation)] {
+        for (title, slider) in [("Animation speed:", animation), ("Pan speed:", pan), ("Motion speed:", motion), ("Rotation speed:", rotation)] {
             let label = NSTextField(labelWithString: title)
             sliderLabels.append((label, slider))
             rows.append([label, Self.captioned(slider)])
@@ -150,15 +151,16 @@ public final class ConfigureSheet: NSObject {
     @objc private func cancelPressed() { close() }
 
     @objc private func okPressed() {
-        let p = polytope.indexOfSelectedItem
-        settings.polytope = p == 0 ? nil : PolytopeKind(rawValue: p - 1)
         settings.projection = .init(rawValue: projection.indexOfSelectedItem) ?? .alternate
         settings.theme = theme.titleOfSelectedItem ?? Theme.ink.name
         settings.animationSpeed = Self.speed(of: animation)
+        settings.panSpeed = Self.speed(of: pan)
         settings.motionSpeed = Self.speed(of: motion)
         settings.speed = Self.speed(of: rotation)
-        settings.flyThrough = .init(rawValue: fly.indexOfSelectedItem) ?? .all
-        settings.coloring = .init(rawValue: coloring.indexOfSelectedItem) ?? .signature
+        settings.flyThrough = .init(rawValue: fly.indexOfSelectedItem) ?? .large
+        let s = surfaces.indexOfSelectedItem, cases = PolychoraSettings.Surfaces.allCases
+        settings.surfaces = cases.indices.contains(s) ? cases[s] : .faces
+        settings.frameColors = .init(rawValue: frameColors.indexOfSelectedItem) ?? .steel
         settings.showInfo = info.state == .on
         settings.showClock = clock.state == .on
         settings.showFPS = fps.state == .on

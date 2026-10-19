@@ -32,6 +32,8 @@ struct Uniforms {
     var metal: SIMD4<Float>
     var metalTint: SIMD4<Float>
     var glass: SIMD4<Float>
+    var cellColor: SIMD4<Float>
+    var cells: SIMD4<Float>
 }
 
 /// Layout mirrors `Instance` in Polychora.metal.
@@ -59,6 +61,8 @@ public final class Renderer {
     }
     public var transition: Transition = .dissolve
     public var coloring: PolychoraSettings.Coloring = .signature
+    public var surfaces: PolychoraSettings.Surfaces = .faces
+    public var frameColors: PolychoraSettings.FrameColors = .steel
 
     public let device: MTLDevice
     public let sampleCount: Int
@@ -76,7 +80,7 @@ public final class Renderer {
     private var models: [PolytopeKind: Model] = [:]
 
     private struct Pipelines {
-        let background, fade, edge, vertex, face, composite: MTLRenderPipelineState
+        let background, fade, edge, vertex, face, cell, composite: MTLRenderPipelineState
     }
 
     /// Weighted blended order-independent transparency (McGuire & Bavoil 2013) for the faces.
@@ -113,6 +117,15 @@ public final class Renderer {
         let faces: MTLBuffer
         let faceCount: Int
         let grid: Mesh
+        /// Every cell's faces at full size (the shader scales them by `kCellScale`); info.x is the highlight
+        /// group (Hopf ring, or the cell itself without rings), info.y the cell index.
+        let cellTris: MTLBuffer
+        /// `cellTris` is sorted by highlight group; each group's instance range.
+        let groupRanges: [Range<Int>]
+        var highlightGroups: Int { groupRanges.count }
+        let cellGrid: Mesh
+        /// Unrotated 4D centroid of each cell (not normalised).
+        let cellCentroids: MTLBuffer
         let edgeRadius: Float
         /// Keyring framing: takes a cell centroid to the projection pole (0,0,0,1), so the pole sits on
         /// that centroid's Hopf fibre and every vertex ring stays bounded in the stereographic view.
@@ -215,6 +228,7 @@ public final class Renderer {
             edge: try pipeline("edge_vs", "opaque_fs", blend: false, alphaToCoverage: true),
             vertex: try pipeline("vertex_vs", "opaque_fs", blend: false, alphaToCoverage: true),
             face: try pipeline("face_vs", "face_fs", blend: false, accumulate: true),
+            cell: try pipeline("cell_vs", "cell_fs", blend: false, accumulate: true),
             composite: try pipeline("background_vs", "oit_composite_fs", blend: true))
     }
 
@@ -244,14 +258,35 @@ public final class Renderer {
                                      c: f4(p.vertices[face[k + 1]]), info: [ring, Float(fi), Float(border), 0]))
             }
         }
-        func buffer(_ a: [Instance]) -> MTLBuffer {
-            device.makeBuffer(bytes: a, length: MemoryLayout<Instance>.stride * a.count)!
+        let centroids = p.cells.map { c in c.reduce(Vec4.zero) { $0 + p.vertices[$1] } / Double(c.count) }
+        let byRing = p.cellRingCount > 1
+        let groupCount = byRing ? p.cellRingCount : p.cells.count
+        var groups = [[Instance]](repeating: [], count: groupCount)
+        for (fi, face) in p.faces.enumerated() {
+            for cell in [p.faceCells[fi].x, p.faceCells[fi].y] {
+                let group = byRing ? p.cellRing[cell] : cell
+                for k in 1..<(face.count - 1) {
+                    groups[group].append(Instance(a: f4(p.vertices[face[0]]), b: f4(p.vertices[face[k]]),
+                                                  c: f4(p.vertices[face[k + 1]]), info: [Float(group), Float(cell), 0, 0]))
+                }
+            }
         }
+        let cellTris = groups.flatMap { $0 }
+        var groupRanges: [Range<Int>] = []
+        for g in groups { let start = groupRanges.last?.upperBound ?? 0; groupRanges.append(start..<(start + g.count)) }
+        func buffer<T>(_ a: [T]) -> MTLBuffer {
+            device.makeBuffer(bytes: a, length: MemoryLayout<T>.stride * a.count)!
+        }
+        // Same grid spacing on S³ for every polytope (≈ 0.04 of the unit radius), so large
+        // stereographic bubbles keep a smooth silhouette.
+        func gridLevel(_ length: Double) -> Int { min(max(Int((length / 0.04).rounded(.up)), 8), 48) }
         let m = Model(polytope: p, edges: buffer(edges), vertices: buffer(verts), faces: buffer(tris),
                       faceCount: tris.count,
-                      // Same grid spacing on S³ for every polytope (≈ 0.04 of the unit radius), so large
-                      // stereographic bubbles keep a smooth silhouette.
-                      grid: grid(level: min(max(Int((p.edgeLength / 0.04).rounded(.up)), 8), 48)),
+                      grid: grid(level: gridLevel(p.edgeLength)),
+                      cellTris: buffer(cellTris), groupRanges: groupRanges,
+                      // Budget of the earlier 70% cells, measured at a steady 120 fps on the 600-cell.
+                      cellGrid: grid(level: gridLevel(p.edgeLength * 0.7)),
+                      cellCentroids: buffer(centroids.map { SIMD4<Float>($0) }),
                       edgeRadius: Float(0.012 * pow(p.edgeLength, 0.4)),
                       framing: Rotation4.aligning(p.cellCentres[0], to: Vec4(0, 0, 0, 1)))
         models[kind] = m
@@ -278,6 +313,8 @@ public final class Renderer {
         let r = m.framing * frame.rotation
         let signature = coloring == .signature
         let face = signature ? t.signatureColors(frame.kind).face : t.face
+        // Joints take the tube colour too, so the frame stays one casting.
+        let metal = frameColors == .signature ? t.signatureColors(frame.kind).edge : t.edge
         func c(_ v: SIMD3<Float>) -> SIMD4<Float> { SIMD4<Float>(v, 1) }
         // EDR: highlights roll off towards min(theme peak, display headroom); the highlight gain only
         // applies to the extent the display has headroom, so SDR output is unchanged.
@@ -292,7 +329,7 @@ public final class Renderer {
             radii: [m.edgeRadius, m.edgeRadius, Float(frame.fade), 0],
             fog: [t.fogDensity, 0.15, 0.9, signature ? t.faceAlpha * t.signature.faceAlphaScale : t.faceAlpha],
             bgTop: c(t.backgroundTop), bgBottom: c(t.backgroundBottom),
-            edgeColor: c(t.edge), vertexColor: c(t.edge), faceColor: c(face),
+            edgeColor: c(metal), vertexColor: c(metal), faceColor: c(face),
             lightDir: SIMD4<Float>(t.lightDir, 0),
             palA: c(t.palette.a), palB: c(t.palette.b), palC: c(t.palette.c), palD: c(t.palette.d),
             style: [signature ? 0 : t.ringMix, t.fresnelPower, t.specular, transition == .dissolve ? 1 : 0],
@@ -304,7 +341,11 @@ public final class Renderer {
             hdr: [ceiling, hdrActive, 0, 0],
             metal: [t.metal.sharpness, t.metal.reflection, t.metal.softbox, t.metal.diffuse],
             metalTint: [t.metal.tint, 0, 0, 0],
-            glass: [t.glass.glassAlpha, t.glass.bubbleAlpha, t.glass.seam, 0])
+            glass: [t.glass.glassAlpha, t.glass.bubbleAlpha, t.glass.seam, 0],
+            cellColor: t.cellColor(frame.kind),
+            // Phase wrapped per group cycle to keep float precision over long sessions.
+            cells: [Float(frame.highlight.truncatingRemainder(dividingBy: Double(m.highlightGroups))),
+                    Float(m.highlightGroups), 0, 0])
     }
 
     public func encode(_ frame: FrameState, pass: MTLRenderPassDescriptor, size: CGSize,
@@ -345,8 +386,28 @@ public final class Renderer {
 
         enc.setDepthStencilState(depthRead)
         enc.setCullMode(.none)
-        enc.setRenderPipelineState(p.face)
-        draw(m.grid, m.faces, count: m.faceCount)
+        switch surfaces {
+        case .none:
+            break
+        case .faces:
+            enc.setRenderPipelineState(p.face)
+            draw(m.grid, m.faces, count: m.faceCount)
+        case .cells:
+            enc.setRenderPipelineState(p.cell)
+            enc.setVertexBuffer(m.cellCentroids, offset: 0, index: 3)
+            enc.setVertexBuffer(m.cellGrid.vertices, offset: 0, index: 0)
+            enc.setVertexBuffer(m.cellTris, offset: 0, index: 1)
+            // Only the highlighted ring is drawn, plus the next one during the hand-over (as in cell_vs).
+            let n = m.highlightGroups
+            let phase = frame.highlight.truncatingRemainder(dividingBy: Double(n))
+            let current = Int(phase), handover = smoothstep(0.6, 1.0, phase - Double(current))
+            for g in handover > 0 ? [current, (current + 1) % n] : [current] {
+                let r = m.groupRanges[g]
+                enc.drawIndexedPrimitives(type: .triangle, indexCount: m.cellGrid.indexCount, indexType: .uint32,
+                                          indexBuffer: m.cellGrid.indices, indexBufferOffset: 0,
+                                          instanceCount: r.count, baseVertex: 0, baseInstance: r.lowerBound)
+            }
+        }
 
         enc.setDepthStencilState(depthOff)
         enc.setRenderPipelineState(p.composite)

@@ -22,13 +22,13 @@ import PolytopeKit
         s.projection = .alternate
         s.flyThrough = .all
         let show = Slideshow(settings: s, randomStart: false)
-        // fade-in 1.5, hold 36, fly 2 + 9 + 36 + 9 (to 93.5), morph 5, hold 36 (to 134.5), fly (to 190.5), fade-out.
+        // fade-in 1.5, hold 60, fly 2 + 9 + 36 + 9 (to 117.5), morph 5, hold 60 (to 182.5), fly (to 238.5), fade-out.
         let expected: [(Double, String)] = [
-            (20, "perspective projection"), (38, "perspective projection"),
-            (40, "perspective fly-through"), (93, "perspective fly-through"),
-            (94, "perspective → stereographic"), (98, "perspective → stereographic"),
-            (99, "stereographic projection"), (135, "stereographic projection"),
-            (137, "stereographic fly-through"), (191, "stereographic fly-through"),
+            (20, "perspective projection"), (62, "perspective projection"),
+            (64, "perspective fly-through"), (117, "perspective fly-through"),
+            (118, "perspective → stereographic"), (122, "perspective → stereographic"),
+            (123, "stereographic projection"), (183, "stereographic projection"),
+            (185, "stereographic fly-through"), (239, "stereographic fly-through"),
         ]
         for (t, label) in expected {
             show.seek(timeline: t, rotation: 0)
@@ -50,8 +50,8 @@ import PolytopeKit
         #expect(abs(spun.highlightTime - 11) < 1e-9)
 
         let show = Slideshow(settings: s, randomStart: false)
-        // fade-in 1.5 + hold 36 + spin-down 2 → approach starts at 39.5 s; fly-through ends at 39.5 + 9 + 36 + 9 = 93.5 s.
-        show.seek(timeline: 39.6, rotation: 0, highlight: 0)
+        // fade-in 1.5 + hold 60 + spin-down 2 → approach starts at 63.5 s; fly-through ends at 63.5 + 9 + 36 + 9 = 117.5 s.
+        show.seek(timeline: 63.6, rotation: 0, highlight: 0)
         let r0 = show.rotationTime
         var maxApproach = 0.0, maxYaw = 0.0
         for _ in 0..<(538 * 6) {
@@ -93,21 +93,21 @@ import PolytopeKit
             }
             return (start, end)
         }
-        // fade-in 1.5/a + hold 36/a, spin-down 2·√r; camera moves for 9/m + 36/p + 9/m.
+        // fade-in 1.5/a + hold 60/a, spin-down 2·√r; camera moves for 9/m + 36/p + 9/m.
         let base = approachWindow()
-        #expect(abs(base.start - 39.5) < 0.02)
+        #expect(abs(base.start - 63.5) < 0.02)
         #expect(abs((base.end - base.start) - 54) < 0.05)
         let slowMotion = approachWindow(motion: 0.5)
-        #expect(abs(slowMotion.start - 39.5) < 0.02)
+        #expect(abs(slowMotion.start - 63.5) < 0.02)
         #expect(abs((slowMotion.end - slowMotion.start) - 72) < 0.05)
         let fastAnimation = approachWindow(animation: 2)
-        #expect(abs(fastAnimation.start - 20.75) < 0.02)
+        #expect(abs(fastAnimation.start - 32.75) < 0.02)
         #expect(abs((fastAnimation.end - fastAnimation.start) - 54) < 0.05)
         let fastPan = approachWindow(pan: 2)
-        #expect(abs(fastPan.start - 39.5) < 0.02)
+        #expect(abs(fastPan.start - 63.5) < 0.02)
         #expect(abs((fastPan.end - fastPan.start) - 36) < 0.05)
         let fastRotation = approachWindow(rotation: 4)
-        #expect(abs(fastRotation.start - 41.5) < 0.02)
+        #expect(abs(fastRotation.start - 65.5) < 0.02)
     }
 
     @Test func noFlyThroughForSmallPolytopesInLargeMode() {

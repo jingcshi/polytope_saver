@@ -47,10 +47,11 @@ Headless render, for comparing looks:
 
 **Motion.** Each polytope rotates by its *natural* one-parameter group: left multiplication by exp(θu) for a quaternion axis u through a vertex of 2T/2I/Q₈ (an isoclinic rotation whose orbits are Hopf circles), or the (θ, 2θ) Petrie double rotation for the 5-cell. One period maps the polytope onto itself, so rings of edges slide along themselves. Edges whose endpoints share an orbit are coloured by ring, which makes the Hopf great circles visible. A slow drift in four planes varies the view.
 
-**Fly-through.** After each view's rotation phase (optionally only for the 120- and 600-cell), the rotation eases to a stop. The camera then travels to the projection centre, pans 360° about the vertical axis, and withdraws along the same path. Every move uses an eased trapezoidal velocity profile: accelerate, cruise, decelerate to rest. Rotation spins back up in the next phase. Three speed sliders (¼×–4×, log-scaled):
-- *Animation speed* scales the still-camera phases: rotation hold (30 s), 360° pan (18 s), fades and morph.
-- *Motion speed* scales the camera's approach and withdraw (7 s each).
-- *Rotation speed* sets ω. Spin-up and spin-down use an angular acceleration proportional to √ω, so they last 3 s × √(rotation speed).
+**Fly-through.** After each view's rotation phase (optionally only for the 120- and 600-cell), the rotation eases to a stop. The camera then travels to the projection centre, pans 360° about the vertical axis, and withdraws along the same path. Every move uses an eased trapezoidal velocity profile: accelerate, cruise, decelerate to rest. Rotation spins back up in the next phase. Four speed sliders (¼×–4×, log-scaled):
+- *Animation speed* scales the still-camera phases: rotation hold (60 s), fades and morph.
+- *Pan speed* scales the 360° pan (36 s).
+- *Motion speed* scales the camera's approach and withdraw (9 s each).
+- *Rotation speed* sets ω. Spin-up and spin-down use an angular acceleration proportional to √ω, so they last 2 s × √(rotation speed).
 
 **Rendering.** Two passes per frame. The background and the steel frame render with 4× MSAA, and colour and depth resolve to single-sample textures. Faces or cells then render at 1× over the resolved frame into weighted blended OIT accumulators (McGuire & Bavoil 2013), depth-tested against the resolved depth. The transparent surfaces have deep overdraw and soft edges, so blending them once per pixel rather than per sample saves about a third of their cost. The options sheet's *Target frame rate* (default 60) caps the display link.
 

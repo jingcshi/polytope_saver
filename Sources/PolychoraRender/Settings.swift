@@ -108,9 +108,20 @@ public struct PolychoraSettings: Sendable {
 
     /// Range of the speed multipliers; the options sheet maps them onto log2-scaled sliders.
     public static let speedRange: ClosedRange<Double> = 0.25...4
-    /// Values offered for `targetFPS`. Display links only run at divisors of the refresh rate, so on
-    /// 120 Hz displays 90 would fall back to 60.
-    public static let targetFPSSteps = [30, 60, 120]
+    /// Mainstream display refresh rates.
+    public static let refreshRates = [60, 75, 100, 120, 144, 165, 180]
+    /// Values offered for `targetFPS`: every whole divisor of a mainstream refresh rate within 24…180 Hz,
+    /// since display links only run at divisors of the refresh rate (see `effectiveFPS`).
+    public static let targetFPSSteps: [Int] = Array(Set(refreshRates.flatMap { r in
+        (1...r / 24).filter { r % $0 == 0 }.map { r / $0 }.filter { $0 >= 24 }
+    })).sorted()
+
+    /// The rate a display link actually runs at for `target` on a `refresh` Hz display: the largest
+    /// whole divisor of the refresh rate not above the target (90 on 120 Hz runs at 60).
+    public static func effectiveFPS(target: Int, refresh: Int) -> Int {
+        guard refresh > 0, target > 0 else { return max(refresh, 1) }
+        return refresh / Int((Double(refresh) / Double(target)).rounded(.up))
+    }
 
     public init() {}
 

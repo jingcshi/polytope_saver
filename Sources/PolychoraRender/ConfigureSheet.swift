@@ -28,6 +28,7 @@ public final class ConfigureSheet: NSObject {
     private let motion = ConfigureSheet.speedSlider()
     private let rotation = ConfigureSheet.speedSlider()
     private let targetFPS = ConfigureSheet.fpsSlider()
+    private let fpsReadout = ConfigureSheet.caption("")
     private let info = NSButton(checkboxWithTitle: "Show info card", target: nil, action: nil)
     private let clock = NSButton(checkboxWithTitle: "Show clock", target: nil, action: nil)
     private let fps = NSButton(checkboxWithTitle: "Show frame rate", target: nil, action: nil)
@@ -55,15 +56,16 @@ public final class ConfigureSheet: NSObject {
         return s
     }
 
-    /// Slider with captions under its ends ("Slow" / "Fast"), or one per tick mark when given as many.
-    private static func captioned(_ slider: NSSlider, _ texts: [String] = ["Slow", "Fast"]) -> NSView {
-        let captions = texts.map { text in
-            let l = NSTextField(labelWithString: text)
-            l.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            l.textColor = .secondaryLabelColor
-            l.translatesAutoresizingMaskIntoConstraints = false
-            return l
-        }
+    private static func caption(_ text: String) -> NSTextField {
+        let l = NSTextField(labelWithString: text)
+        l.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        l.textColor = .secondaryLabelColor
+        l.translatesAutoresizingMaskIntoConstraints = false
+        return l
+    }
+
+    /// Slider with captions under it: the first and last at its ends, the rest evenly spread between.
+    private static func captioned(_ slider: NSSlider, _ captions: [NSTextField] = ["Slow", "Fast"].map(caption)) -> NSView {
         let box = NSView()
         slider.translatesAutoresizingMaskIntoConstraints = false
         ([slider] + captions).forEach(box.addSubview)
@@ -77,7 +79,7 @@ public final class ConfigureSheet: NSObject {
             first.bottomAnchor.constraint(equalTo: box.bottomAnchor),
         ]
         constraints += captions.map { $0.topAnchor.constraint(equalTo: slider.bottomAnchor, constant: 1) }
-        // Inner captions centre on their tick marks, which span the track inset by the knob's half-width.
+        // Inner captions centre on evenly spaced points spanning the track inset by the knob's half-width.
         let inset: CGFloat = 10, n = CGFloat(captions.count - 1)
         for (i, c) in captions.enumerated().dropFirst().dropLast() {
             let f = CGFloat(i) / n
@@ -112,7 +114,12 @@ public final class ConfigureSheet: NSObject {
         pan.doubleValue = log2(settings.panSpeed)
         motion.doubleValue = log2(settings.motionSpeed)
         rotation.doubleValue = log2(settings.speed)
-        targetFPS.doubleValue = Double(PolychoraSettings.targetFPSSteps.firstIndex(of: settings.targetFPS) ?? 1)
+        targetFPS.doubleValue = Double(PolychoraSettings.targetFPSSteps.firstIndex(of: settings.targetFPS)
+                                       ?? PolychoraSettings.targetFPSSteps.firstIndex(of: 60)!)
+        targetFPS.target = self
+        targetFPS.action = #selector(targetFPSChanged)
+        fpsReadout.textColor = .labelColor
+        targetFPSChanged()
         info.state = settings.showInfo ? .on : .off
         clock.state = settings.showClock ? .on : .off
         fps.state = settings.showFPS ? .on : .off
@@ -129,7 +136,17 @@ public final class ConfigureSheet: NSObject {
         }
         let fpsLabel = NSTextField(labelWithString: "Target frame rate:")
         sliderLabels.append((fpsLabel, targetFPS))
-        rows.append([fpsLabel, Self.captioned(targetFPS, PolychoraSettings.targetFPSSteps.map(String.init))])
+        let steps = PolychoraSettings.targetFPSSteps
+        rows.append([fpsLabel, Self.captioned(targetFPS, [Self.caption("\(steps.first!)"), fpsReadout,
+                                                          Self.caption("\(steps.last!)")])])
+        let tip = """
+            Frames per second to aim for. A display only shows whole divisors of its refresh rate, so other \
+            values fall back to the next lower one (90 on a 120 Hz display runs at 60). Check your display's \
+            refresh rate and your Mac's graphics performance before choosing above 60: higher rates draw more \
+            power and heat.
+            """
+        fpsLabel.toolTip = tip
+        targetFPS.toolTip = tip
         rows += [info, clock, fps].map { [NSGridCell.emptyContentView, $0] }
 
         let grid = NSGridView(views: rows)
@@ -172,6 +189,10 @@ public final class ConfigureSheet: NSObject {
     }
 
     @objc private func cancelPressed() { close() }
+
+    @objc private func targetFPSChanged() {
+        fpsReadout.stringValue = "\(PolychoraSettings.targetFPSSteps[targetFPS.integerValue]) fps"
+    }
 
     @objc private func okPressed() {
         settings.projection = .init(rawValue: projection.indexOfSelectedItem) ?? .alternate

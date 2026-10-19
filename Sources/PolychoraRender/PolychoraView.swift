@@ -189,7 +189,8 @@ public final class PolychoraView: NSView, MTKViewDelegate {
         // Callback times jitter by milliseconds, but frames reach the screen on whole refresh intervals:
         // advance by whole intervals so motion steps evenly (visible as judder in pans below 120 fps).
         let refresh = coveredScreen?.maximumFramesPerSecond ?? 60
-        let interval = 1 / Double(min(view.preferredFramesPerSecond, refresh > 0 ? refresh : 60))
+        let fps = PolychoraSettings.effectiveFPS(target: view.preferredFramesPerSecond, refresh: refresh > 0 ? refresh : 60)
+        let interval = 1 / Double(fps)
         let dt = lastTime.map { min(max(1, ((now - $0) / interval).rounded()) * interval, 0.1) } ?? 0
         lastTime = now
         if !paused { slideshow.advance(by: dt) }

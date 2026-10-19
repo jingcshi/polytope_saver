@@ -13,11 +13,12 @@
 
 - [ ] Wide gamut (Display P3 primaries) for more saturated palettes. EDR currently uses extended-linear sRGB, so the colours are unchanged.
 - [ ] Polytope materials and textures (next round). Reference: the "Dimensions" film (Jos Leys, Étienne Ghys, Aurélien Alvarez), whose fly-in and pan our camera independently reproduces.
-    - [ ] Glass / acrylic texture, see `references/`. Agreed plan, in order:
+    - [x] Glass / acrylic texture, see `references/`. Agreed plan, in order:
       1. [x] Cast-steel framework (tubes and joints at 60% of the old radius): joint spheres at tube radius (seamless union), dark metal with sharp specular and a fake environment reflection from the theme gradient and glow. Neutral steel per theme (Brass stays brass); the signature hue moves to glass and cells.
       2. [x] Order-independent transparency (weighted blended), then faces: solid glass (perspective; higher alpha, face-border seams, optional screen-space refraction) blending into soft bubbles (stereographic; low alpha, strong Fresnel), driven by `stereo`. Fixes the too-transparent faces.
       3. Cells (built, verify), as an options-sheet alternative to faces ("Surfaces"): shrunk to 70% about their centroids; acrylic (Beer–Lambert absorption by thickness, taken from the view ray's chord through each cell's circumsphere instead of a depth pass); cells fade as their centroid nears the stereographic pole blending into jelly (wrap lighting, softer specular, thin-region glow). Colouring (revised): per theme a standard and an active colour in the signature hue (`Theme.cells`); one Hopf ring (5-cell: one cell) is highlighted at a time, 6 s each with a 2 s cross-fade, on a clock that runs only while the polytope rotates. Cells now at full size (`kCellScale`); feathered shells (70% core fading out to full size) looked best but cost too much (below 80 fps, fan audible) and were removed.
     - [x] One signature color palette for each polytope: OKLCH hues red 5-cell 29°, blue tesseract 264°, yellow 16-cell 100°, magenta 24-cell 330°, cyan 120-cell 200°, green 600-cell 145° (swapped for a calmer 600-cell). Per-theme lightness and chroma in `Theme.signature`; options sheet "Edge colours: Signature / Hopf rings".
+    - [ ] Investigate the round glow inside some cells. Not only tetrahedral ones -- also observed in the 8-cell and even the 120-cell.
 
 ## Later
 
@@ -97,6 +98,6 @@
 - [x] Speed controls regrouped by perception: Animation / Motion / Rotation sliders (slow → fast, Flurry-style ticked sliders with captions); options sheet sized by its contents (fixed control widths) so System Settings no longer clips it.
 - [x] Appex verified on macOS 27 with built-in + DELL: no display dysfunction over 20 hot-corner triggers and 20 settings previews (legacy host's wrong-canvas and post-rapid-trigger blackouts are gone).
 - [x] Verified that the options sheet closes via `configureSheetDidEnd` and the host app's activation (PaperSaver) works.
-- [x] Speed constants calibrated: spin 2 s × √ω, approach/withdraw 9 s, pan 36 s, hold 36 s (all at speed 1); slider range ¼×–4×.
+- [x] Speed constants calibrated: spin 2 s × √ω, approach/withdraw 9 s, pan 36 s, hold 60 s (all at speed 1); slider range ¼×–4×.
 - [x] Fly-through tuned
-- [x] Faces and cells drawn in a single-sample pass after the 4× MSAA frame pass (colour and depth resolved), cutting 600-cell stereographic faces from 4.4 to 3.1 ms GPU at 3456×2234. "Target frame rate" option (30 / 60 / 120, default 60) for less capable Macs; 90 dropped because display links only run at divisors of the 120 Hz refresh. Below 120, animation time advances in whole refresh intervals and frames present at even spacing (`present(afterMinimumDuration:)`).
+- [x] Faces and cells drawn in a single-sample pass after the 4× MSAA frame pass (colour and depth resolved), cutting 600-cell stereographic faces from 4.4 to 3.1 ms GPU at 3456×2234. "Target frame rate" option (default 60) for less capable Macs: every whole divisor of a mainstream refresh rate (60, 75, 100, 120, 144, 165, 180 Hz) within 24–180, with a live readout and a tooltip; display links only run at divisors of the refresh rate, so other values fall to the next lower one (90 on 120 Hz runs at 60). Below 120, animation time advances in whole refresh intervals and frames present at even spacing (`present(afterMinimumDuration:)`).
